@@ -150,7 +150,9 @@ https://github.com/ChrisTitusTech/neovim
 #### Game Launchers
 
 - **Heroic**: Manage Heroic launcher installation with Install, Uninstall, or Abort actions.
+- **Itch**: The itch.io desktop app, for buying, downloading and playing indie games. From the AUR on Arch (itch-setup-bin), Flathub elsewhere.
 - **Lutris**: Manage Lutris launcher installation with Install, Uninstall, or Abort actions.
+- **Minigalaxy**: A simple GOG client: sign in, then download, install and play your GOG games, with WINE for Windows ones.
 - **RetroArch**: Manage RetroArch launcher installation with Install, Uninstall, or Abort actions.
 - **Steam**: Manage Steam launcher installation with Install, Uninstall, or Abort actions.
 
@@ -166,6 +168,19 @@ https://github.com/AdnanHodzic/auto-cpufreq
 - **ProtonPlus**: Manage ProtonPlus installation with native packages first and Flatpak fallback.
 - **ProtonUp-Qt**: Manage ProtonUp-Qt installation with native packages first and Flatpak fallback.
 - **Waydroid**: Waydroid is an emulator that allows you to run Android apps and games on Linux.
+
+#### WINE and Proton
+
+WINE for running Windows programs, and the Proton builds and compatibility tools Steam can run games with.
+
+- **Boxtron**: A Steam compatibility tool that runs DOS games through the native DOSBox. Choose it under a game's Properties, Compatibility in Steam. Arch only, from the AUR.
+- **Luxtorpeda**: A Steam compatibility tool that runs games with native Linux engines instead of their Windows builds. Choose it under a game's Properties, Compatibility in Steam. Arch only, from the AUR (luxtorpeda-bin).
+- **Proton CachyOS**: CachyOS's Proton build for Steam, with extra fixes and optimisations (the Steam Linux Runtime build). Choose it under a game's Properties, Compatibility in Steam. Arch only, from Chaotic-AUR or the AUR (proton-cachyos-slr).
+- **Protontricks**: Winetricks for Steam's Proton games: install Windows components and change settings in a game's prefix. Debian has it only in contrib; Flathub is the fallback.
+- **WINE**: Runs Windows programs on Linux. The distribution's own build; WINE Staging and WINE Meta are alternatives on Arch and Garuda.
+- **WINE Staging**: WINE with the staging patches, newer fixes that are not yet in WINE itself. It replaces WINE, so remove WINE first; while WINE is installed this shows as already installed. Arch only.
+- **WINE Meta**: Garuda's meta-package for WINE: WINE with Gecko, Mono, Winetricks, WineASIO and the libraries Windows games commonly need. Garuda only.
+- **Winetricks**: Installs Windows components (fonts, runtimes, DirectX pieces) and changes settings in WINE prefixes. Debian has it only in contrib.
 
 ## Configurations
 
