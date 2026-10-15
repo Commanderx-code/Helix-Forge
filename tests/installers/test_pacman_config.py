@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -39,9 +40,18 @@ class PacmanConfigTests(unittest.TestCase):
         (self.root / 'common-script.sh').write_text('checkEnv() { ESCALATION_TOOL=env; }\nRED=; RC=; GREEN=\n')
         self.cwd = here
         self.cores = subprocess.run(['nproc'], capture_output=True, text=True).stdout.strip()
+        # A minimal system: no diffutils (cmp, diff), as in the Arch and Fedora images.
+        self.tools = self.root / 'tools'
+        self.tools.mkdir()
+        for directory in ('/usr/bin', '/bin'):
+            for tool in Path(directory).iterdir():
+                link = self.tools / tool.name
+                if tool.name not in ('cmp', 'diff', 'diff3', 'sdiff') and not os.path.lexists(link):
+                    link.symlink_to(tool)
 
     def run_script(self):
-        result = subprocess.run(['sh', '-e', './pacman-config.sh'], cwd=self.cwd, capture_output=True, text=True)
+        result = subprocess.run(['sh', '-e', './pacman-config.sh'], cwd=self.cwd, capture_output=True, text=True,
+                                env=dict(os.environ, PATH=str(self.tools)))
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
 
