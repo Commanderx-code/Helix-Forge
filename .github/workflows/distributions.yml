@@ -243,7 +243,8 @@ jobs:
               dnf install -y ./packages/helixforge-*.x86_64.rpm
               rpm -ql helixforge > files.txt ;;
           esac
-          test "$(command -v helixforge)" = /usr/bin/helixforge
+          # Arch and Fedora link /usr/sbin to /usr/bin, which comes first on PATH.
+          test "$(readlink -f "$(command -v helixforge)")" = /usr/bin/helixforge
           helixforge --version | grep -qE '^helixforge [0-9]+\.[0-9]+\.[0-9]+$'
           helixforge list --json | python3 -c 'import json, sys; assert json.load(sys.stdin)["schema"] == 1'
           helixforge system | grep -q "(${{ matrix.family }} family)"
