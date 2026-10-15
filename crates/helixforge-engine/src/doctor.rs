@@ -4,7 +4,7 @@
 //! system.
 
 use crate::{Plan, Step, quote};
-use helixforge_core::{PackageManager, Risk};
+use helixforge_core::{PackageManager, Risk, printable};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -81,12 +81,15 @@ impl Repair {
             })
             .collect::<Vec<_>>()
             .join(" &&\n");
-        let display = self
-            .commands
-            .iter()
-            .map(|command| command.join(" "))
-            .collect::<Vec<_>>()
-            .join(" && ");
+        // Shown in plans; the program keeps the real words, quoted.
+        let display = printable(
+            &self
+                .commands
+                .iter()
+                .map(|command| command.join(" "))
+                .collect::<Vec<_>>()
+                .join(" && "),
+        );
         let mut requires: Vec<String> = self
             .commands
             .iter()
@@ -126,6 +129,8 @@ pub trait System {
     fn space(&self, path: &Path) -> Option<(u64, u64)>;
     /// The owner's user id.
     fn owner(&self, path: &Path) -> Option<u32>;
+    /// Whether the path itself is a symbolic link.
+    fn is_link(&self, path: &Path) -> bool;
     fn user(&self) -> (u32, u32, PathBuf);
     fn on_path(&self, tool: &str) -> bool;
     /// Names of running processes.
@@ -207,6 +212,10 @@ impl System for Here {
             .map(|metadata| metadata.uid())
     }
 
+    fn is_link(&self, path: &Path) -> bool {
+        std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink())
+    }
+
     fn user(&self) -> (u32, u32, PathBuf) {
         (
             nix::unistd::getuid().as_raw(),
@@ -235,7 +244,27 @@ impl System for Here {
 const PROBE_HOST: &str = "github.com";
 
 /// Run every check.
+/// What is shown is made printable: journal lines, unit and file names and
+/// error text come from outside HelixForge.
 pub fn examine(system: &dyn System, manager: Option<PackageManager>) -> Vec<Diagnosis> {
+    let mut found = gather(system, manager);
+    for diagnosis in &mut found {
+        diagnosis.title = printable(&diagnosis.title);
+        diagnosis.summary = printable(&diagnosis.summary);
+        diagnosis.evidence = diagnosis
+            .evidence
+            .iter()
+            .map(|line| printable(line))
+            .collect();
+        diagnosis.advice = diagnosis.advice.as_deref().map(printable);
+        if let Some(repair) = &mut diagnosis.repair {
+            repair.label = printable(&repair.label);
+        }
+    }
+    found
+}
+
+fn gather(system: &dyn System, manager: Option<PackageManager>) -> Vec<Diagnosis> {
     let mut found = Vec::new();
     let online = network(system, &mut found);
     dns(system, online, &mut found);
@@ -593,7 +622,9 @@ fn permissions(system: &dyn System, into: &mut Vec<Diagnosis>) {
         return;
     }
     let mut wrong: Vec<PathBuf> = Vec::new();
-    if system.owner(&home).is_some_and(|owner| owner != uid) {
+    // Links are never handed to chown; they are only mentioned.
+    let mut links: Vec<PathBuf> = Vec::new();
+    if !system.is_link(&home) && system.owner(&home).is_some_and(|owner| owner != uid) {
         wrong.push(home.clone());
     }
     for folder in [
@@ -608,18 +639,28 @@ fn permissions(system: &dyn System, into: &mut Vec<Diagnosis>) {
             if folder == home && !name.starts_with('.') {
                 continue;
             }
+            if system.is_link(&path) {
+                if system.owner(&path) == Some(0) {
+                    links.push(path);
+                }
+                continue;
+            }
             if system.owner(&path) == Some(0) && !wrong.contains(&path) {
                 wrong.push(path);
             }
         }
     }
+    let left_alone =
+        |path: &PathBuf| format!("a link owned by root, left alone: {}", path.display());
     if wrong.is_empty() {
-        into.push(diagnosis(
+        let mut found = diagnosis(
             "permissions",
             "Home folder permissions",
             Health::Good,
             "Your home folder and settings are yours",
-        ));
+        );
+        found.evidence.extend(links.iter().map(left_alone));
+        into.push(found);
         return;
     }
     let mut found = diagnosis(
@@ -641,11 +682,16 @@ fn permissions(system: &dyn System, into: &mut Vec<Diagnosis>) {
         "Programs running as you cannot change these. This usually comes from running a program with sudo."
             .into(),
     );
+    found.evidence.extend(links.iter().map(left_alone));
     let owner = format!("{uid}:{gid}");
+    // -h changes a link itself and -P never follows one while recursing, so
+    // nothing outside these paths changes, even if one becomes a link later.
     let mut command: Vec<String> = vec![
         "sudo".into(),
         "chown".into(),
         "-R".into(),
+        "-h".into(),
+        "-P".into(),
         owner,
         "--".into(),
     ];
@@ -914,6 +960,10 @@ impl System for Fake {
         Some(self.owners.get(path).copied().unwrap_or(1000))
     }
 
+    fn is_link(&self, path: &Path) -> bool {
+        self.links.contains_key(path)
+    }
+
     fn user(&self) -> (u32, u32, PathBuf) {
         (1000, 1000, self.home.clone())
     }
@@ -1088,6 +1138,34 @@ mod tests {
     }
 
     #[test]
+    fn text_from_outside_cannot_drive_the_terminal() {
+        let mut fake = healthy();
+        fake.commands.insert(
+            "systemctl --failed --no-legend --plain".into(),
+            (true, "x.service loaded failed failed X\n".into()),
+        );
+        fake.commands.insert(
+            "journalctl -n 5 --no-pager -q -o cat -u x.service".into(),
+            (true, "\u{1b}]52;c;bWFsaWNl\u{7}\u{1b}[2Jgone\n".into()),
+        );
+        fake.dns = Some(Err("bad\u{1b}[31m".into()));
+        let found = examine(&fake, Some(PackageManager::Arch));
+        for diagnosis in &found {
+            for text in diagnosis
+                .evidence
+                .iter()
+                .chain([&diagnosis.summary, &diagnosis.title])
+            {
+                assert!(!text.chars().any(char::is_control), "{text:?}");
+            }
+        }
+        assert_eq!(
+            find(&found, "service:x.service").evidence,
+            ["journal: ?]52;c;bWFsaWNl??[2Jgone"]
+        );
+    }
+
+    #[test]
     fn graphics_without_a_driver_point_to_an_entry() {
         let mut fake = healthy();
         fake.links.clear();
@@ -1165,8 +1243,28 @@ mod tests {
         );
         assert_eq!(
             permissions.repair.as_ref().unwrap().plan("x").steps[0].display(),
-            "sudo chown -R 1000:1000 -- /home/me/.local/share/Shelly"
+            "sudo chown -R -h -P 1000:1000 -- /home/me/.local/share/Shelly"
         );
+        // A link owned by root is never handed to chown, only mentioned.
+        fake.folders
+            .insert("/home/me/.config".into(), vec!["evil".into()]);
+        fake.owners.insert("/home/me/.config/evil".into(), 0);
+        fake.links
+            .insert("/home/me/.config/evil".into(), "/etc/shadow".into());
+        let found = examine(&fake, Some(PackageManager::Arch));
+        let permissions = find(&found, "permissions");
+        let command = &permissions.repair.as_ref().unwrap().commands[0];
+        assert!(
+            !command.iter().any(|word| word.contains("evil")),
+            "{command:?}"
+        );
+        assert!(
+            permissions
+                .evidence
+                .iter()
+                .any(|line| line == "a link owned by root, left alone: /home/me/.config/evil")
+        );
+        fake.folders.remove(Path::new("/home/me/.config"));
         // A path with a quote in it stays one quoted word in the program.
         fake.folders
             .insert("/home/me/.config".into(), vec!["it's".into()]);

@@ -1426,7 +1426,7 @@ impl App {
         }
         let home = std::env::var("HOME").unwrap_or_default();
         let shown = |path: &std::path::Path| {
-            let text = path.display().to_string();
+            let text = helixforge_core::printable(&path.display().to_string());
             match text.strip_prefix(&home) {
                 Some(rest) if !home.is_empty() => format!("~{rest}"),
                 _ => text,
@@ -2320,9 +2320,9 @@ impl App {
         };
         let text = format!(
             "Backup of: {}\nTaken: {}\nCopy: {}\nKind: {}, {}\n\nEnter restores it. The current {} is moved aside as its own backup first, so the restore can be undone the same way.",
-            backup.original.display(),
+            helixforge_core::printable(&backup.original.display().to_string()),
             backup.taken.as_deref().unwrap_or("unknown"),
-            backup.backup.display(),
+            helixforge_core::printable(&backup.backup.display().to_string()),
             if backup.directory {
                 "a folder"
             } else {

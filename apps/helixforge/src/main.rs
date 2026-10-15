@@ -8,7 +8,7 @@ mod tui;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use helixforge_catalog::Catalog;
-use helixforge_core::{Action, Entry, Item, NativeAction};
+use helixforge_core::{Action, Entry, Item, NativeAction, printable};
 use helixforge_engine::{
     InheritedRunner, Machine, PackageState, Plan, backups, doctor, execute, history,
     inventory::{Inventory, Status, which},
@@ -435,8 +435,8 @@ fn main() -> Result<()> {
                     "{}  {:<6}  {}\n    {}",
                     backup.taken.as_deref().unwrap_or("unknown time       "),
                     if backup.system { "system" } else { "user" },
-                    backup.original.display(),
-                    backup.backup.display()
+                    printable(&backup.original.display().to_string()),
+                    printable(&backup.backup.display().to_string())
                 );
             }
             Ok(())

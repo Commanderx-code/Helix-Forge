@@ -51,3 +51,13 @@
 - **Not provided.** Rollback, verification of scripts, commands and Nix
   entries beyond their exit status, and isolation of what an entry's script
   does once it runs.
+- Text HelixForge shows but did not write (journal lines, unit, file and
+  backup names, error messages, paths found on the PATH) goes through
+  `printable()`, which turns control characters into `?`, so it cannot start
+  terminal escape sequences in the menu or on the command line. The programs
+  that run keep the real names, quoted.
+- Helix Doctor's permissions repair never names a symbolic link and runs
+  `chown -R -h -P`: a link is changed itself, never what it points at, and
+  none is followed while recursing, so the repair cannot hand a system file
+  to the user even if a path becomes a link before it runs. Backups are found
+  without following links, and links are never offered for restore.
