@@ -20,6 +20,7 @@ pub mod inventory;
 pub mod preflight;
 pub mod profiles;
 pub mod pty;
+pub mod updates;
 
 use helixforge_core::{
     Action, Entry, NativeAction, NixAction, PackageManager, Risk, valid_package_name,
