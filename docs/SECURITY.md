@@ -56,8 +56,12 @@
   `printable()`, which turns control characters into `?`, so it cannot start
   terminal escape sequences in the menu or on the command line. The programs
   that run keep the real names, quoted.
-- Helix Doctor's permissions repair never names a symbolic link and runs
-  `chown -R -h -P`: a link is changed itself, never what it points at, and
-  none is followed while recursing, so the repair cannot hand a system file
-  to the user even if a path becomes a link before it runs. Backups are found
+- Helix Doctor's permissions repair only names paths whose real location is
+  exactly where they appear in the home: it does not look inside a folder
+  that is a link or reached through one, and an item that resolves elsewhere
+  is only mentioned. Just before `chown` runs, a guard checks each path again
+  with `realpath` and stops, changing nothing, if one has moved or is reached
+  through a link. `chown -R -h -P` then changes a link itself, never what it
+  points at, and follows none while recursing, so the repair cannot hand a
+  system file to the user. Backups are found
   without following links, and links are never offered for restore.

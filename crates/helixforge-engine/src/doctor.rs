@@ -131,6 +131,8 @@ pub trait System {
     fn owner(&self, path: &Path) -> Option<u32>;
     /// Whether the path itself is a symbolic link.
     fn is_link(&self, path: &Path) -> bool;
+    /// The path with every link resolved.
+    fn canonical(&self, path: &Path) -> Option<PathBuf>;
     fn user(&self) -> (u32, u32, PathBuf);
     fn on_path(&self, tool: &str) -> bool;
     /// Names of running processes.
@@ -214,6 +216,10 @@ impl System for Here {
 
     fn is_link(&self, path: &Path) -> bool {
         std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink())
+    }
+
+    fn canonical(&self, path: &Path) -> Option<PathBuf> {
+        std::fs::canonicalize(path).ok()
     }
 
     fn user(&self) -> (u32, u32, PathBuf) {
@@ -621,11 +627,20 @@ fn permissions(system: &dyn System, into: &mut Vec<Diagnosis>) {
     if uid == 0 || home.as_os_str().is_empty() {
         return;
     }
+    let Some(real_home) = system.canonical(&home) else {
+        return;
+    };
+    // Where a path in the home really is, if no link anywhere on its way
+    // leads out of where it appears; None otherwise.
+    let inside = |path: &Path| -> Option<PathBuf> {
+        let expected = real_home.join(path.strip_prefix(&home).ok()?);
+        (system.canonical(path)? == expected).then_some(expected)
+    };
     let mut wrong: Vec<PathBuf> = Vec::new();
     // Links are never handed to chown; they are only mentioned.
     let mut links: Vec<PathBuf> = Vec::new();
-    if !system.is_link(&home) && system.owner(&home).is_some_and(|owner| owner != uid) {
-        wrong.push(home.clone());
+    if system.owner(&real_home).is_some_and(|owner| owner != uid) {
+        wrong.push(real_home.clone());
     }
     for folder in [
         home.clone(),
@@ -634,6 +649,10 @@ fn permissions(system: &dyn System, into: &mut Vec<Diagnosis>) {
         home.join(".local/bin"),
         home.join(".cache"),
     ] {
+        // A folder that is a link, or reached through one, is not looked in.
+        if folder != home && (system.is_link(&folder) || inside(&folder).is_none()) {
+            continue;
+        }
         for name in system.list(&folder) {
             let path = folder.join(&name);
             if folder == home && !name.starts_with('.') {
@@ -645,13 +664,22 @@ fn permissions(system: &dyn System, into: &mut Vec<Diagnosis>) {
                 }
                 continue;
             }
-            if system.owner(&path) == Some(0) && !wrong.contains(&path) {
-                wrong.push(path);
+            if system.owner(&path) != Some(0) {
+                continue;
+            }
+            match inside(&path) {
+                Some(real) if !wrong.contains(&real) => wrong.push(real),
+                Some(_) => {}
+                None => links.push(path),
             }
         }
     }
-    let left_alone =
-        |path: &PathBuf| format!("a link owned by root, left alone: {}", path.display());
+    let left_alone = |path: &PathBuf| {
+        format!(
+            "owned by root through a link, left alone: {}",
+            path.display()
+        )
+    };
     if wrong.is_empty() {
         let mut found = diagnosis(
             "permissions",
@@ -684,6 +712,15 @@ fn permissions(system: &dyn System, into: &mut Vec<Diagnosis>) {
     );
     found.evidence.extend(links.iter().map(left_alone));
     let owner = format!("{uid}:{gid}");
+    // Just before the change, every path must still be where it was found,
+    // with no link on its way; otherwise nothing changes.
+    let mut guard: Vec<String> = vec![
+        "sh".into(),
+        "-c".into(),
+        "for path; do [ \"$(realpath -e -- \"$path\")\" = \"$path\" ] || { echo \"HelixForge: $path moved or is reached through a link now; nothing was changed\" >&2; exit 1; }; done".into(),
+        "sh".into(),
+    ];
+    guard.extend(wrong.iter().map(|path| path.to_string_lossy().into_owned()));
     // -h changes a link itself and -P never follows one while recursing, so
     // nothing outside these paths changes, even if one becomes a link later.
     let mut command: Vec<String> = vec![
@@ -698,7 +735,7 @@ fn permissions(system: &dyn System, into: &mut Vec<Diagnosis>) {
     command.extend(wrong.iter().map(|path| path.to_string_lossy().into_owned()));
     found.repair = Some(Repair {
         label: "give them back to you".into(),
-        commands: vec![command],
+        commands: vec![guard, command],
     });
     into.push(found);
 }
@@ -920,6 +957,8 @@ pub struct Fake {
     pub dns: Option<Result<Vec<String>, String>>,
     pub spaces: HashMap<PathBuf, (u64, u64)>,
     pub owners: HashMap<PathBuf, u32>,
+    /// Where a path really is, when a link on the way leads elsewhere.
+    pub canonical: HashMap<PathBuf, PathBuf>,
     pub tools: Vec<String>,
     pub running: Vec<String>,
     pub home: PathBuf,
@@ -962,6 +1001,15 @@ impl System for Fake {
 
     fn is_link(&self, path: &Path) -> bool {
         self.links.contains_key(path)
+    }
+
+    fn canonical(&self, path: &Path) -> Option<PathBuf> {
+        Some(
+            self.canonical
+                .get(path)
+                .cloned()
+                .unwrap_or_else(|| path.to_path_buf()),
+        )
     }
 
     fn user(&self) -> (u32, u32, PathBuf) {
@@ -1241,8 +1289,11 @@ mod tests {
             permissions.evidence,
             ["owned by root: /home/me/.local/share/Shelly"]
         );
+        let commands = &permissions.repair.as_ref().unwrap().commands;
+        assert_eq!(commands[0][..2], ["sh", "-c"], "the guard comes first");
+        assert_eq!(commands[0][4..], ["/home/me/.local/share/Shelly"]);
         assert_eq!(
-            permissions.repair.as_ref().unwrap().plan("x").steps[0].display(),
+            commands[1].join(" "),
             "sudo chown -R -h -P 1000:1000 -- /home/me/.local/share/Shelly"
         );
         // A link owned by root is never handed to chown, only mentioned.
@@ -1253,16 +1304,17 @@ mod tests {
             .insert("/home/me/.config/evil".into(), "/etc/shadow".into());
         let found = examine(&fake, Some(PackageManager::Arch));
         let permissions = find(&found, "permissions");
-        let command = &permissions.repair.as_ref().unwrap().commands[0];
+        let commands = &permissions.repair.as_ref().unwrap().commands;
         assert!(
-            !command.iter().any(|word| word.contains("evil")),
-            "{command:?}"
+            !commands.concat().iter().any(|word| word.contains("evil")),
+            "{commands:?}"
         );
         assert!(
             permissions
                 .evidence
                 .iter()
-                .any(|line| line == "a link owned by root, left alone: /home/me/.config/evil")
+                .any(|line| line
+                    == "owned by root through a link, left alone: /home/me/.config/evil")
         );
         fake.folders.remove(Path::new("/home/me/.config"));
         // A path with a quote in it stays one quoted word in the program.
@@ -1282,6 +1334,87 @@ mod tests {
         assert!(program.contains("'/home/me/.config/it'\\''s'"), "{program}");
     }
 
+    #[test]
+    fn folders_and_items_reached_through_links_are_left_alone() {
+        // A folder that is a link is not looked in.
+        let mut linked = healthy();
+        linked
+            .folders
+            .insert("/home/me/.local/share".into(), vec!["dbus-1".into()]);
+        linked
+            .owners
+            .insert("/home/me/.local/share/dbus-1".into(), 0);
+        linked
+            .links
+            .insert("/home/me/.local/share".into(), "/usr/share".into());
+        let check =
+            |fake: &Fake| find(&examine(fake, Some(PackageManager::Arch)), "permissions").clone();
+        assert_eq!(check(&linked).health, Health::Good);
+        // Nor one reached through a link further up.
+        linked.links.clear();
+        linked
+            .canonical
+            .insert("/home/me/.local/share".into(), "/usr/share".into());
+        assert_eq!(check(&linked).health, Health::Good);
+        // An item that resolves elsewhere is only mentioned.
+        linked.canonical.clear();
+        linked.canonical.insert(
+            "/home/me/.local/share/dbus-1".into(),
+            "/usr/share/dbus-1".into(),
+        );
+        let permissions = check(&linked);
+        assert_eq!(permissions.health, Health::Good);
+        assert_eq!(
+            permissions.evidence,
+            ["owned by root through a link, left alone: /home/me/.local/share/dbus-1"]
+        );
+    }
+
+    #[test]
+    fn the_guard_stops_the_repair_when_a_path_is_reached_through_a_link() {
+        let root = tempfile::tempdir().unwrap();
+        let base = root.path().canonicalize().unwrap();
+        let real = base.join("real");
+        std::fs::create_dir(&real).unwrap();
+        let link = base.join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        // The repair's own guard, as permissions() builds it.
+        let mut fake = healthy();
+        fake.folders
+            .insert("/home/me/.config".into(), vec!["x".into()]);
+        fake.owners.insert("/home/me/.config/x".into(), 0);
+        let found = examine(&fake, Some(PackageManager::Arch));
+        let guard = find(&found, "permissions")
+            .repair
+            .as_ref()
+            .unwrap()
+            .commands[0][..4]
+            .to_vec();
+        let passes = |path: &Path| {
+            let mut words = guard.clone();
+            words.push(path.to_string_lossy().into_owned());
+            let repair = Repair {
+                label: "test".into(),
+                commands: vec![words],
+            };
+            let Step::Shell { program, .. } = &repair.plan("x").steps[0] else {
+                panic!("expected a shell step");
+            };
+            Command::new("sh")
+                .arg("-c")
+                .arg(program)
+                .status()
+                .unwrap()
+                .success()
+        };
+        assert!(passes(&real));
+        assert!(!passes(&link), "a link fails the guard");
+        assert!(
+            !passes(&link.join("..").join("real")),
+            "so does a path through one"
+        );
+        assert!(!passes(&base.join("gone")), "and a path that is gone");
+    }
     #[test]
     fn boot_problems_offer_the_matching_rebuild() {
         let mut fake = healthy();
