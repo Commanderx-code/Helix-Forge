@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use helixforge_core::PackageManager;
+use helixforge_core::{PackageManager, printable};
 use helixforge_platform::LinuxInfo;
 
 use crate::doctor::System;
@@ -54,12 +54,16 @@ impl Channel {
         }
     }
 
+    /// The commands as shown, safe to print.
     pub fn command_line(&self) -> String {
-        self.commands
-            .iter()
-            .map(|command| command.join(" "))
-            .collect::<Vec<_>>()
-            .join(" && ")
+        printable(
+            &self
+                .commands
+                .iter()
+                .map(|command| command.join(" "))
+                .collect::<Vec<_>>()
+                .join(" && "),
+        )
     }
 }
 
@@ -317,7 +321,21 @@ pub fn overview(
             });
         }
     }
-    channels
+    // Package names, versions, flake input names and paths come from outside
+    // HelixForge: keep terminal control characters out of what is shown.
+    channels.into_iter().map(cleaned).collect()
+}
+
+fn cleaned(mut channel: Channel) -> Channel {
+    channel.name = printable(&channel.name);
+    channel.note = printable(&channel.note);
+    channel.caveat = channel.caveat.as_deref().map(printable);
+    for pending in channel.pending.iter_mut().flatten() {
+        pending.name = printable(&pending.name);
+        pending.from = pending.from.as_deref().map(printable);
+        pending.to = pending.to.as_deref().map(printable);
+    }
+    channel
 }
 
 /// Home Manager with a flake in its configuration directory.
@@ -640,6 +658,35 @@ mod tests {
         assert_eq!(channels[1].summary(), "up to date");
         // The online Flatpak command was not given, so it is unknown.
         assert_eq!(channels[2].pending, None);
+    }
+
+    #[test]
+    fn control_characters_from_the_tools_are_not_shown() {
+        let mut fake = machine();
+        fake.commands.insert(
+            "pacman -Qu".into(),
+            (true, "evil\x1b]0;x\x07 1 -> 2\x1b[2J\n".into()),
+        );
+        fake.files.insert(
+            PathBuf::from("/home/me/.config/home-manager/flake.lock"),
+            r#"{"nodes":{"bad\u001b[31m":{"locked":{"lastModified":1791331200}},"root":{}}}"#
+                .into(),
+        );
+        let channels = overview(&fake, &arch(), &places(), false);
+        let shown = format!("{channels:?}");
+        assert!(
+            !shown.contains('\x1b') && !shown.contains('\x07'),
+            "{shown}"
+        );
+        let pending = &channels[0].pending.as_ref().unwrap()[0];
+        assert_eq!(pending.name, "evil?]0;x?");
+        assert_eq!(pending.to.as_deref(), Some("2?[2J"));
+        assert!(channels[3].note.starts_with("bad?[31m locked at"));
+        // The plan's commands are shown cleaned, though they run as given.
+        let mut odd = channels[3].clone();
+        odd.commands = vec![vec!["nix".into(), "/home/\x1b[2Jme".into()]];
+        let plan = plan(&[&odd]);
+        assert_eq!(plan.steps[0].display(), "nix /home/?[2Jme");
     }
 
     #[test]

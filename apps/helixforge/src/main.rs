@@ -473,19 +473,24 @@ fn main() -> Result<()> {
                     );
                 }
                 for channel in &found {
-                    println!("{} [{}]: {}", channel.name, channel.id, channel.summary());
-                    println!("  {}", channel.note);
+                    println!(
+                        "{} [{}]: {}",
+                        printable(&channel.name),
+                        channel.id,
+                        channel.summary()
+                    );
+                    println!("  {}", printable(&channel.note));
                     for pending in channel.pending.iter().flatten() {
                         let versions = match (&pending.from, &pending.to) {
                             (Some(from), Some(to)) => format!("{from} -> {to}"),
                             (None, Some(to)) => to.clone(),
                             _ => String::new(),
                         };
-                        println!("    {} {versions}", printable(&pending.name));
+                        println!("    {} {}", printable(&pending.name), printable(&versions));
                     }
                     println!("  Update: {}", channel.command_line());
                     if let Some(caveat) = &channel.caveat {
-                        println!("  Note: {caveat}");
+                        println!("  Note: {}", printable(caveat));
                     }
                 }
                 return Ok(());
