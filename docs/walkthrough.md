@@ -149,10 +149,13 @@ https://github.com/ChrisTitusTech/neovim
 
 #### Game Launchers
 
+- **Faugus Launcher**: A simple launcher for Windows games and launchers (EA app, Ubisoft Connect, Battle.net, Rockstar and others) through umu-launcher and Proton. From Chaotic-AUR or the AUR on Arch, Flathub elsewhere.
 - **Heroic**: Manage Heroic launcher installation with Install, Uninstall, or Abort actions.
 - **Itch**: The itch.io desktop app, for buying, downloading and playing indie games. From the AUR on Arch (itch-setup-bin), Flathub elsewhere.
 - **Lutris**: Manage Lutris launcher installation with Install, Uninstall, or Abort actions.
 - **Minigalaxy**: A simple GOG client: sign in, then download, install and play your GOG games, with WINE for Windows ones.
+- **Prism Launcher**: An open-source Minecraft launcher: separate instances, mod loaders and mod downloads, and Microsoft account sign-in. From Arch's repositories, Flathub elsewhere.
+- **Rare**: A light Epic Games launcher built on Legendary: sign in, then install, update and play your Epic library. Heroic covers Epic too, with GOG and Amazon. From Chaotic-AUR or the AUR on Arch, Flathub elsewhere.
 - **RetroArch**: Manage RetroArch launcher installation with Install, Uninstall, or Abort actions.
 - **Steam**: Manage Steam launcher installation with Install, Uninstall, or Abort actions.
 
