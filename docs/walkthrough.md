@@ -162,6 +162,8 @@ https://github.com/ChrisTitusTech/neovim
 https://github.com/AdnanHodzic/auto-cpufreq
 - **Auto Mount Drive**: This utility is designed to help with automating the process of mounting a drive on to your system.
 - **Bottles**: Bottles allows Windows software, like applications and games, to run on Linux. Bottles also provides tools to categorize, organize and optimize your applications.
+- **CachyOS Gaming Applications**: CachyOS's gaming applications: everything in CachyOS Gaming Packages, plus Steam, Lutris, Heroic, Faugus Launcher, Gamescope, MangoHud and GOverlay. On CachyOS, its cachyos-gaming-applications package; on other Arch-based systems the same packages from Arch, multilib and Chaotic-AUR or the AUR. Needs multilib, and paru or yay off CachyOS.
+- **CachyOS Gaming Packages**: CachyOS's gaming dependencies: Proton CachyOS, umu-launcher, WINE, Winetricks, Protontricks, Vulkan tools and the 32-bit libraries games need. On CachyOS, its cachyos-gaming-meta package; on other Arch-based systems the same packages from Arch, multilib and Chaotic-AUR or the AUR, with Arch's wine in place of CachyOS's own WINE build. Needs multilib, and paru or yay off CachyOS.
 - **Gaming Dependencies**: Installs gaming runtime dependencies across distributions. Steam and Lutris are managed separately from Game Launchers.
 - **General GPU Drivers**: Auto-detects your GPU and installs a recommended driver stack for your distro, with NixOS guidance.
 - **Nvidia Drivers & Hardware Acceleration**: Opens the Arch-specific NVIDIA installer (kept under System Setup / Arch).
