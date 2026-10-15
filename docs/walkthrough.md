@@ -171,6 +171,14 @@ https://github.com/AdnanHodzic/auto-cpufreq
 - **ProtonUp-Qt**: Manage ProtonUp-Qt installation with native packages first and Flatpak fallback.
 - **Waydroid**: Waydroid is an emulator that allows you to run Android apps and games on Linux.
 
+#### RuneScape
+
+Launchers for RuneScape and Old School RuneScape on Linux.
+
+- **Bolt Launcher**: A free, open-source third-party launcher for Jagex accounts: RuneScape 3, Old School RuneScape with RuneLite or HDOS, and plugins. From Chaotic-AUR or the AUR (bolt-launcher) on Arch, Flathub elsewhere.
+- **Jagex Launcher (Flatpak)**: The Windows Jagex Launcher in a community Flatpak with WINE built in, for RuneScape and Old School RuneScape, installed for your account from nmlynch94's repository with the 32-bit runtime pieces it needs (and the NVIDIA libraries matching your driver). Not affiliated with Jagex; needs Flatpak.
+- **Jagex Launcher (AppImage)**: Jagex's official Linux launcher, a beta AppImage that plays Old School RuneScape through RuneLite (RuneScape later), downloaded from Jagex to ~/.local/share/helixforge/appimages with a jagex-launcher command and a menu entry. Installs fuse3 first if AppImages cannot start. Run it again to update.
+
 #### WINE and Proton
 
 WINE for running Windows programs, and the Proton builds and compatibility tools Steam can run games with.
