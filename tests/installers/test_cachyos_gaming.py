@@ -7,7 +7,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 TOOLS = ROOT / 'scripts/installers/commander'
-HIDDEN = {'pacman', 'sudo', 'doas', 'paru', 'yay', 'apt-get', 'nala', 'dnf'}
+HIDDEN = {'pacman', 'sudo', 'doas', 'paru', 'yay', 'apt-get', 'nala', 'dnf', 'id'}
 
 PACMAN = '''#!/bin/sh
 echo "pacman $*" >> "$FAKE/log"
@@ -44,6 +44,9 @@ class CachyosGamingTests(unittest.TestCase):
                     link.symlink_to(tool)
         (self.bin / 'pacman').write_text(PACMAN)
         (self.bin / 'sudo').write_text('#!/bin/sh\nexec "$@"\n')
+        # A normal user, also where the tests run as root, as in containers.
+        real_id = shutil.which('id')
+        (self.bin / 'id').write_text(f'#!/bin/sh\n[ "$1" = -u ] && echo "${{FAKE_UID:-1000}}" && exit\nexec {real_id} "$@"\n')
         for tool in self.bin.iterdir():
             tool.chmod(0o755)
         (self.fake / 'installed').write_text('')
@@ -111,6 +114,14 @@ class CachyosGamingTests(unittest.TestCase):
         result = self.run_script('meta', repo=['lib32-gtk3'], helper=None)
         self.assertEqual(result.returncode, 1)
         self.assertIn('Not installed: proton-cachyos-slr', result.stderr)
+
+    def test_root_is_refused(self):
+        os.environ['FAKE_UID'] = '0'
+        self.addCleanup(os.environ.pop, 'FAKE_UID')
+        result = self.run_script('meta', repo=['lib32-gtk3'])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('normal user', result.stderr)
+        self.assertEqual(self.installs(), [])
 
     def test_an_unknown_kind_is_refused(self):
         result = self.run_script('everything', repo=['lib32-gtk3'])
