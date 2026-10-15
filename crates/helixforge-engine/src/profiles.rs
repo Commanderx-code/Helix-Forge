@@ -5,7 +5,7 @@
 //! queued and run like the built-in ones.
 
 use helixforge_catalog::Catalog;
-use helixforge_core::{Action, Entry, Group, Item, valid_id};
+use helixforge_core::{Action, Entry, Group, Item, printable, valid_id};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -34,6 +34,8 @@ pub enum ProfileError {
     Format(PathBuf, String),
     #[error("the profile has no entries")]
     Empty,
+    #[error("the profile's name or description contains control characters")]
+    Control,
     #[error("the profile names entries this catalog does not have: {}", .0.join(", "))]
     Unknown(Vec<String>),
     #[error("the name {0:?} gives no usable file name; use letters or digits")]
@@ -70,21 +72,29 @@ pub fn read(path: &Path, catalog: &Catalog) -> Result<Profile, ProfileError> {
     let text = std::fs::read_to_string(path)
         .map_err(|error| ProfileError::Read(path.to_path_buf(), error.to_string()))?;
     let profile: Profile = toml::from_str(&text)
-        .map_err(|error| ProfileError::Format(path.to_path_buf(), error.message().to_string()))?;
+        .map_err(|error| ProfileError::Format(path.to_path_buf(), printable(error.message())))?;
     check(&profile, catalog)?;
     Ok(profile)
 }
 
-/// Every entry must exist in the catalog, and there must be one.
+/// Every entry must exist in the catalog, there must be one, and the name
+/// and description must be plain text: a shared file could otherwise carry
+/// terminal escape sequences into the menu.
 pub fn check(profile: &Profile, catalog: &Catalog) -> Result<(), ProfileError> {
     if profile.entries.is_empty() {
         return Err(ProfileError::Empty);
+    }
+    if [&profile.name, &profile.description]
+        .iter()
+        .any(|text| text.chars().any(char::is_control))
+    {
+        return Err(ProfileError::Control);
     }
     let unknown: Vec<String> = profile
         .entries
         .iter()
         .filter(|id| catalog.find(id).is_none())
-        .cloned()
+        .map(|id| printable(id))
         .collect();
     if unknown.is_empty() {
         Ok(())
@@ -167,11 +177,11 @@ pub fn load_all(directory: &Path, catalog: &Catalog) -> (Vec<(String, Profile)>,
 pub fn entry(slug: &str, profile: &Profile) -> Entry {
     Entry {
         id: format!("{PREFIX}{slug}"),
-        name: profile.name.clone(),
+        name: printable(&profile.name),
         description: if profile.description.is_empty() {
-            format!("Your profile: {}.", profile.entries.join(", "))
+            format!("Your profile: {}.", printable(&profile.entries.join(", ")))
         } else {
-            profile.description.clone()
+            printable(&profile.description)
         },
         flags: String::new(),
         multi_select: true,
@@ -291,6 +301,26 @@ mod tests {
             save(directory.path(), &profile("!!!", &["git"]), &catalog),
             Err(ProfileError::Name(_))
         ));
+        // Escape sequences in a shared file never reach the terminal.
+        assert!(matches!(
+            save(
+                directory.path(),
+                &profile("Evil\u{1b}[2J", &["git"]),
+                &catalog
+            ),
+            Err(ProfileError::Control)
+        ));
+        let unknown = check(&profile("x", &["git\u{1b}]52;c;x\u{7}"]), &catalog)
+            .unwrap_err()
+            .to_string();
+        assert!(!unknown.chars().any(char::is_control), "{unknown:?}");
+        let written = directory.path().join("evil.toml");
+        std::fs::write(&written, "name = \"Evil\\u001b[2J\"\nentries = [\"git\"]\n").unwrap();
+        assert!(matches!(
+            read(&written, &catalog),
+            Err(ProfileError::Control)
+        ));
+        std::fs::remove_file(&written).unwrap();
         std::fs::write(directory.path().join("broken.toml"), "name = 3\n").unwrap();
         let (found, problems) = load_all(directory.path(), &catalog);
         assert_eq!(found.len(), 1);
