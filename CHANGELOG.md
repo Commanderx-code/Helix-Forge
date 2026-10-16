@@ -15,7 +15,7 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   copies its files to a private folder, checks them against the verified
   sums and their signatures (`pacman-key --verify`, `rpm -K`; Debian packages
   against this machine's signed index, or `--trust-bundle`), and installs
-  them without downloading, after confirmation. Entries that need the network are named, not bundled.
+  them from its files, after confirmation. Entries that need the network are named, not bundled.
   pacman, apt and dnf are supported; zypper not yet.
 - The README's screenshots show the new sidebar.
 

@@ -31,8 +31,8 @@ pub enum BundleCommand {
     /// Check a bundle: made for this distribution and architecture, and every
     /// file matching its checksum.
     Verify { directory: PathBuf },
-    /// Check a bundle, then install its packages from its files without
-    /// downloading, after confirmation. A bundle installs as a whole: its
+    /// Check a bundle, then install its packages from its files, after
+    /// confirmation. A bundle installs as a whole: its
     /// entries share their dependencies.
     Install {
         directory: PathBuf,

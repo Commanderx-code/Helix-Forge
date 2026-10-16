@@ -694,7 +694,7 @@ fn plain_manifest(manifest: &Manifest) -> bool {
 /// manifest verified here, which are written into the plan itself, so
 /// nothing changed in the bundle afterwards is installed. Then each
 /// package's signature is checked (pacman's with pacman-key, rpm's with rpm
-/// -K), and the package manager installs them without downloading.
+/// -K), and the package manager installs them from the files.
 ///
 /// Debian packages carry no signature of their own: each must be known to
 /// this machine's repository index (signed, and checked by apt) with the
@@ -815,7 +815,9 @@ pub fn plan_install(
     let files: Vec<String> = installable.iter().map(|file| staged(file)).collect();
     let (install, tool) = match manager {
         PackageManager::Arch => ("sudo pacman -U --needed", "pacman"),
-        PackageManager::Debian => ("sudo apt-get install --no-download", "apt-get"),
+        // apt's --no-download refuses the local files too; with everything
+        // in the bundle, nothing is downloaded.
+        PackageManager::Debian => ("sudo apt-get install", "apt-get"),
         _ => ("sudo dnf install --disablerepo='*'", "dnf"),
     };
     lines.push(format!("{install} {}", files.join(" ")));
@@ -1238,7 +1240,7 @@ mod tests {
         assert!(
             planned.steps[0]
                 .display()
-                .contains("apt-get install --no-download htop_3.2_amd64.deb")
+                .contains("sudo apt-get install htop_3.2_amd64.deb")
         );
         // Known to the index with the same checksum: accepted.
         let file = std::fs::canonicalize(bundle.join("packages/htop_3.2_amd64.deb")).unwrap();

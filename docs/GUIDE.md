@@ -168,7 +168,8 @@ On a machine of the same distribution that is online, `helixforge bundle
 create ~/bundle git htop neovim` puts those entries' packages and HelixForge
 itself in a folder. Copy it to the other machine, and there, inside it, run
 `./helixforge bundle install .`: it checks every file, then installs from
-them without downloading. Entries that need the network are named so you can
+them; with everything in the bundle, nothing is downloaded. Entries that need
+the network are named so you can
 run them later.
 
 ## When something is wrong
