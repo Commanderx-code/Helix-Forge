@@ -246,6 +246,10 @@ pub enum BaselineError {
     Later(PathBuf, u32),
     #[error("the baseline contains control characters")]
     Control,
+    #[error("the baseline records more than a baseline can")]
+    TooLarge,
+    #[error("the baseline names {0}, which is not an entry id")]
+    Id(String),
     #[error("the baseline names a path HelixForge does not compare: {0}")]
     Path(String),
     #[error("the name {0:?} gives no usable file name; use letters or digits")]
@@ -922,16 +926,6 @@ pub fn read(path: &Path) -> Result<Baseline, BaselineError> {
 /// Plain text throughout, ids that are ids and paths HelixForge compares: a
 /// shared file could otherwise carry escape sequences into the terminal.
 pub fn check(baseline: &Baseline) -> Result<(), BaselineError> {
-    if baseline.entries.len() > MAX_RECORDS
-        || baseline.applied.len() > MAX_RECORDS
-        || baseline.files.len() > MAX_FILES
-        || baseline.settings.len() > MAX_RECORDS
-    {
-        return Err(BaselineError::Format(
-            PathBuf::from(&baseline.name),
-            "it records more than a baseline can".to_string(),
-        ));
-    }
     let control = |text: &str| text.chars().any(char::is_control);
     let mut texts: Vec<&str> = vec![&baseline.name, &baseline.system];
     for recorded in &baseline.entries {
@@ -949,6 +943,13 @@ pub fn check(baseline: &Baseline) -> Result<(), BaselineError> {
     if texts.into_iter().any(control) {
         return Err(BaselineError::Control);
     }
+    if baseline.entries.len() > MAX_RECORDS
+        || baseline.applied.len() > MAX_RECORDS
+        || baseline.files.len() > MAX_FILES
+        || baseline.settings.len() > MAX_RECORDS
+    {
+        return Err(BaselineError::TooLarge);
+    }
     let ids = baseline
         .entries
         .iter()
@@ -962,10 +963,7 @@ pub fn check(baseline: &Baseline) -> Result<(), BaselineError> {
         );
     for id in ids {
         if !valid_id(id) {
-            return Err(BaselineError::Format(
-                PathBuf::from(&baseline.name),
-                format!("{} is not an entry id", printable(id)),
-            ));
+            return Err(BaselineError::Id(printable(id)));
         }
     }
     if let Some(record) = baseline
@@ -1412,7 +1410,24 @@ mod tests {
                 .collect(),
             ..base.clone()
         };
-        assert!(check(&huge).is_err());
+        assert!(matches!(check(&huge), Err(BaselineError::TooLarge)));
+        // Whatever is wrong, no error repeats an escape sequence it was given.
+        for bad in [
+            Baseline {
+                name: "\u{1b}]52;c;x\u{7}".into(),
+                ..huge.clone()
+            },
+            Baseline {
+                entries: vec![Recorded {
+                    id: "x\u{1b}[2J".into(),
+                    ..Recorded::default()
+                }],
+                ..base.clone()
+            },
+        ] {
+            let message = check(&bad).unwrap_err().to_string();
+            assert!(!message.chars().any(char::is_control), "{message:?}");
+        }
         let fine = directory.path().join("fine.toml");
         // Fields a later version adds are ignored.
         std::fs::write(&fine, "name = \"x\"\nunknown = 1\n").unwrap();
