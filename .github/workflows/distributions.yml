@@ -62,7 +62,8 @@ jobs:
           # The oldest release the packages are built for (glibc 2.35).
           - image: ubuntu:22.04
             family: Debian
-            group: Ubuntu
+            # The Ubuntu group's entries need 24.04.
+            group: Debian / Ubuntu
             removable: mypaint
             program: mypaint
           - image: fedora:latest
@@ -84,7 +85,14 @@ jobs:
             Arch) pacman -Syu --noconfirm --needed sudo git python which ;;
             Debian) apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y sudo git python3 curl ca-certificates ;;
             Fedora) dnf install -y sudo git python3 which findutils ;;
-            openSUSE) zypper --non-interactive install sudo git python3 which findutils curl tar gzip gawk ;;
+            openSUSE)
+              zypper --non-interactive install sudo git python3 which findutils curl tar gzip gawk
+              # zypper takes answers only from a terminal; the other package
+              # managers read the "yes" piped into each run below. Answer for
+              # it the same way, where sudo's secure path finds it.
+              mv /usr/bin/zypper /usr/bin/zypper.real
+              printf '#!/bin/sh\nexec /usr/bin/zypper.real --non-interactive "$@"\n' > /usr/bin/zypper
+              chmod +x /usr/bin/zypper ;;
           esac
       - uses: actions/checkout@v4
         with:
