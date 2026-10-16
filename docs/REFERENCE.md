@@ -219,6 +219,7 @@ each signature (`pacman-key --verify`, `rpm -K`), and installs them with
 signature of their own: each must be in this machine's signed repository
 index with the same checksum, or the install is refused unless
 `--trust-bundle` takes the bundle's word, for a bundle you made yourself.
+A bundle installs as a whole, since its entries share their dependencies.
 pacman fetches only a dependency the bundle lacks, and only when the network
 is there; a `--complete` bundle lacks none.
 

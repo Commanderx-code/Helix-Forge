@@ -113,6 +113,10 @@ pub enum BundleError {
     Machine(String, String),
     #[error("the bundle is damaged: {0}")]
     Damaged(String),
+    #[error(
+        "the bundle installs as a whole: its packages, shared between {0}, go in together; make a bundle of only the entries wanted"
+    )]
+    Partial(String),
 }
 
 /// The family a bundle is made for.
@@ -183,7 +187,16 @@ pub fn contents(
     let words: Vec<&str> = names.iter().map(String::as_str).collect();
     match manager {
         PackageManager::Arch => {
-            let mut command: Vec<String> = vec!["pacman".into(), "-Sp".into()];
+            // An empty cache, so pacman gives the mirrors' addresses rather
+            // than those of packages it keeps on this machine.
+            let cache = scratch.join("cache");
+            std::fs::create_dir_all(&cache).map_err(|error| BundleError::Io(error.to_string()))?;
+            let mut command: Vec<String> = vec![
+                "pacman".into(),
+                "-Sp".into(),
+                "--cachedir".into(),
+                cache.display().to_string(),
+            ];
             if complete {
                 // An empty local database, so every dependency is listed; the
                 // sync databases are this machine's.
@@ -353,7 +366,15 @@ pub fn create(
         }
         let mut assurance = None;
         if let Some(checksum) = &download.checksum {
-            if !matches(&target, checksum)? {
+            let strong = checksum.starts_with("sha256:") || checksum.starts_with("sha512:");
+            let good = if strong {
+                matches(&target, checksum)?
+            } else {
+                // apt printed a weaker hash: ask its index for the SHA-256.
+                let (sha256, _) = sha256_file(&target)?;
+                known_to_apt(&target, &sha256, tools.system)
+            };
+            if !good {
                 let _ = std::fs::remove_file(&target);
                 return Err(BundleError::Mismatch(printable(&download.file)));
             }
@@ -526,8 +547,22 @@ pub fn verify(directory: &Path, platform: &LinuxInfo) -> Result<Manifest, Bundle
         }
     }
     // Arch packages install only with the signature beside them, which is
-    // checked before they do.
+    // checked before they do: a detached signature and nothing else.
     if family_name == "arch" {
+        for file in manifest
+            .files
+            .iter()
+            .filter(|file| file.path.ends_with(".sig"))
+        {
+            let bytes = std::fs::read(directory.join(&file.path))
+                .map_err(|error| BundleError::Io(error.to_string()))?;
+            if !detached_signature(&bytes) {
+                return Err(BundleError::Damaged(format!(
+                    "{} is not a detached signature",
+                    printable(&file.path)
+                )));
+            }
+        }
         for file in &manifest.files {
             let signed = format!("{}.sig", file.path);
             if file.path.starts_with("packages/")
@@ -542,6 +577,86 @@ pub fn verify(directory: &Path, platform: &LinuxInfo) -> Result<Manifest, Bundle
         }
     }
     Ok(manifest)
+}
+
+/// Whether bytes are binary OpenPGP signature packets and nothing else, as a
+/// detached signature is: no literal data, no compressed or one-pass
+/// packets that could carry a message of their own.
+pub fn detached_signature(bytes: &[u8]) -> bool {
+    if bytes.is_empty() || bytes.len() > 64 * 1024 {
+        return false;
+    }
+    let mut at = 0;
+    while at < bytes.len() {
+        let header = bytes[at];
+        if header & 0x80 == 0 {
+            return false;
+        }
+        let (tag, length, used) = if header & 0x40 != 0 {
+            // New format: one, two or five length octets.
+            let tag = header & 0x3f;
+            let Some(&first) = bytes.get(at + 1) else {
+                return false;
+            };
+            match first {
+                0..=191 => (tag, first as usize, 2),
+                192..=223 => {
+                    let Some(&second) = bytes.get(at + 2) else {
+                        return false;
+                    };
+                    (
+                        tag,
+                        ((first as usize - 192) << 8) + second as usize + 192,
+                        3,
+                    )
+                }
+                255 => {
+                    let Some(four) = bytes.get(at + 2..at + 6) else {
+                        return false;
+                    };
+                    (
+                        tag,
+                        u32::from_be_bytes([four[0], four[1], four[2], four[3]]) as usize,
+                        6,
+                    )
+                }
+                // Partial lengths belong to data packets, not signatures.
+                _ => return false,
+            }
+        } else {
+            let tag = (header >> 2) & 0x0f;
+            match header & 0x03 {
+                0 => {
+                    let Some(&one) = bytes.get(at + 1) else {
+                        return false;
+                    };
+                    (tag, one as usize, 2)
+                }
+                1 => {
+                    let Some(two) = bytes.get(at + 1..at + 3) else {
+                        return false;
+                    };
+                    (tag, u16::from_be_bytes([two[0], two[1]]) as usize, 3)
+                }
+                2 => {
+                    let Some(four) = bytes.get(at + 1..at + 5) else {
+                        return false;
+                    };
+                    (
+                        tag,
+                        u32::from_be_bytes([four[0], four[1], four[2], four[3]]) as usize,
+                        5,
+                    )
+                }
+                _ => return false,
+            }
+        };
+        if tag != 2 {
+            return false;
+        }
+        at += used + length;
+    }
+    at == bytes.len()
 }
 
 /// Plain text throughout: a manifest from someone else could otherwise put
@@ -593,11 +708,22 @@ pub fn plan_install(
     trust: bool,
 ) -> Result<Plan, BundleError> {
     let (manager, _) = family(platform.manager)?;
-    let chosen: Vec<&BundledEntry> = manifest
+    // Entries share dependencies, so the bundle's packages install together:
+    // naming some would still install them all, which the plan would not say.
+    let offline_ids: Vec<&str> = manifest
         .entries
         .iter()
-        .filter(|entry| ids.is_empty() || ids.contains(&entry.id))
+        .filter(|entry| entry.offline)
+        .map(|entry| entry.id.as_str())
         .collect();
+    if !ids.is_empty()
+        && !offline_ids
+            .iter()
+            .all(|id| ids.iter().any(|wanted| wanted == id))
+    {
+        return Err(BundleError::Partial(offline_ids.join(", ")));
+    }
+    let chosen: Vec<&BundledEntry> = manifest.entries.iter().collect();
     let mut plan = Plan::default();
     for entry in &chosen {
         if let Some(network) = &entry.network {
@@ -672,7 +798,8 @@ pub fn plan_install(
         PackageManager::Arch => {
             for file in &installable {
                 lines.push(format!(
-                    "sudo pacman-key --verify {}.sig || exit 1",
+                    "sudo pacman-key --verify {}.sig {} || exit 1",
+                    staged(file),
                     staged(file)
                 ));
             }
@@ -816,6 +943,32 @@ mod tests {
         }
     }
 
+    /// The smallest detached signature the checks accept: one signature
+    /// packet, new format, one byte long.
+    const SIGNATURE: &[u8] = &[0xc2, 0x01, 0x04];
+
+    #[test]
+    fn only_bare_signature_packets_count_as_a_detached_signature() {
+        assert!(detached_signature(SIGNATURE));
+        // Old format, tag 2, one-byte length.
+        assert!(detached_signature(&[0x88, 0x01, 0x04]));
+        // Two signatures in a row.
+        assert!(detached_signature(&[0xc2, 0x01, 0x04, 0x88, 0x01, 0x04]));
+        // A literal data packet (tag 11), a one-pass signature (tag 4), a
+        // compressed packet (tag 8), armour, a short or empty file: no.
+        for bad in [
+            &[0xcb, 0x01, 0x00][..],
+            &[0xc4, 0x01, 0x00],
+            &[0xc8, 0x01, 0x00],
+            b"-----BEGIN PGP SIGNATURE-----",
+            &[0xc2, 0x05, 0x04],
+            &[],
+            &[0xc2, 0x01, 0x04, 0xcb, 0x01, 0x00],
+        ] {
+            assert!(!detached_signature(bad), "{bad:?}");
+        }
+    }
+
     /// Downloads served from a map of URL to contents.
     fn served(files: HashMap<String, Vec<u8>>) -> impl Fn(&str, &Path) -> bool {
         move |url: &str, to: &Path| match files.get(url) {
@@ -828,12 +981,13 @@ mod tests {
     fn an_arch_bundle_holds_packages_and_signatures_and_installs_offline() {
         let catalog = Catalog::builtin(false).unwrap();
         let arch = platform(PackageManager::Arch, "arch");
+        let scratch = tempfile::tempdir().unwrap();
+        let scratch_cache = scratch.path().join("cache");
         let mut fake = Fake::default();
         fake.commands.insert(
-            "pacman -Sp --print-format %f %l htop".into(),
+            format!("pacman -Sp --cachedir {} --print-format %f %l htop", scratch_cache.display()),
             "htop-3.5.3-1-x86_64.pkg.tar.zst https://mirror.example/extra/os/x86_64/htop-3.5.3-1-x86_64.pkg.tar.zst\n".into(),
         );
-        let scratch = tempfile::tempdir().unwrap();
         let ids = vec![
             "htop".to_string(),
             "steam".to_string(),
@@ -853,7 +1007,7 @@ mod tests {
         let url = "https://mirror.example/extra/os/x86_64/htop-3.5.3-1-x86_64.pkg.tar.zst";
         let download = served(HashMap::from([
             (url.to_string(), b"package".to_vec()),
-            (format!("{url}.sig"), b"signature".to_vec()),
+            (format!("{url}.sig"), SIGNATURE.to_vec()),
         ]));
         let tools = Tools {
             system: &fake,
@@ -904,6 +1058,11 @@ mod tests {
                 .iter()
                 .any(|note| note.contains("Steam") && note.contains("network"))
         );
+        // Naming only some of the bundle's offline entries is refused.
+        assert!(matches!(
+            plan_install(&bundle, &read, &["steam".to_string()], &arch, &fake, false),
+            Err(BundleError::Partial(_))
+        ));
         // Another distribution, or a damaged file, is refused.
         assert!(matches!(
             verify(&bundle, &platform(PackageManager::Debian, "debian")),
@@ -924,9 +1083,13 @@ mod tests {
     fn arch_bundle(at: &Path) -> (Manifest, LinuxInfo, Fake) {
         let catalog = Catalog::builtin(false).unwrap();
         let arch = platform(PackageManager::Arch, "arch");
+        let scratch_cache = at.join("cache");
         let mut fake = Fake::default();
         fake.commands.insert(
-            "pacman -Sp --print-format %f %l htop".into(),
+            format!(
+                "pacman -Sp --cachedir {} --print-format %f %l htop",
+                scratch_cache.display()
+            ),
             "htop-1-1-x86_64.pkg.tar.zst https://mirror.example/htop-1-1-x86_64.pkg.tar.zst\n"
                 .into(),
         );
@@ -938,7 +1101,7 @@ mod tests {
             ),
             (
                 "https://mirror.example/htop-1-1-x86_64.pkg.tar.zst.sig".to_string(),
-                b"sig".to_vec(),
+                SIGNATURE.to_vec(),
             ),
         ]));
         let tools = Tools {

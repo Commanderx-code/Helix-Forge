@@ -32,11 +32,10 @@ pub enum BundleCommand {
     /// file matching its checksum.
     Verify { directory: PathBuf },
     /// Check a bundle, then install its packages from its files without
-    /// downloading, after confirmation.
+    /// downloading, after confirmation. A bundle installs as a whole: its
+    /// entries share their dependencies.
     Install {
         directory: PathBuf,
-        /// The entries to install; all of the bundle's when none.
-        ids: Vec<String>,
         /// Install Debian packages this machine's repository index does not
         /// know, on the bundle's word: only for a bundle you made yourself.
         #[arg(long)]
@@ -217,7 +216,6 @@ pub fn run(
         }
         BundleCommand::Install {
             directory,
-            ids,
             trust_bundle,
             dry_run,
             yes,
@@ -231,7 +229,7 @@ pub fn run(
             let planned = bundle::plan_install(
                 &directory,
                 &manifest,
-                &ids,
+                &[],
                 platform,
                 &doctor::Here,
                 trust_bundle,

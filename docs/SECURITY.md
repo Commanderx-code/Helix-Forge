@@ -18,7 +18,8 @@ update before reporting.
 A bundle's manifest is checked before anything in it is used: plain text,
 made for this distribution family and architecture, every file inside the
 bundle under a plain name and matching its SHA-256, and every pacman package
-with its signature. The install copies the files into a new private folder
+with its signature, a detached one made only of signature packets. The
+install copies the files into a new private folder
 and checks the copies against the sums it verified, carried in the plan
 itself, so a bundle changed after the check (on a shared drive, say) is not
 installed. Each pacman package's signature is checked with `pacman-key
