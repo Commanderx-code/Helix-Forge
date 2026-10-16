@@ -83,7 +83,10 @@ jobs:
         run: |
           case "${{ matrix.family }}" in
             Arch) pacman -Syu --noconfirm --needed sudo git python which ;;
-            Debian) apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y sudo git python3 curl ca-certificates ;;
+            Debian)
+              apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y sudo git python3 curl ca-certificates
+              # The installer tests read TOML; Python before 3.11 needs tomli.
+              python3 -c 'import tomllib' 2>/dev/null || apt-get install -y python3-tomli ;;
             Fedora) dnf install -y sudo git python3 which findutils ;;
             openSUSE)
               zypper --non-interactive install sudo git python3 which findutils curl tar gzip gawk
