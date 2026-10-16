@@ -23,6 +23,11 @@ use std::{
 /// The baseline file format this version writes.
 pub const FORMAT: u32 = 1;
 
+/// Limits on what a shared baseline may ask a comparison to do.
+const MAX_FILE: u64 = 4 << 20;
+const MAX_RECORDS: usize = 10_000;
+const MAX_FILES: usize = 1_000;
+
 /// A saved state of a machine.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Baseline {
@@ -788,6 +793,7 @@ pub fn valid_path(path: &str) -> bool {
 /// A folder tree larger than this is compared by its presence only.
 const TREE_FILES: usize = 5_000;
 const TREE_BYTES: u64 = 256 << 20;
+const TREE_DEPTH: usize = 64;
 
 /// What a path is now: its kind, its checksum and a link's target.
 fn look(path: &Path) -> (FileKind, Option<String>, Option<String>) {
@@ -807,19 +813,41 @@ fn look(path: &Path) -> (FileKind, Option<String>, Option<String>) {
             tree(path, Path::new(""), &mut hasher, &mut budget).then(|| hex(&hasher.finalize()));
         return (FileKind::Directory, sum, None);
     }
-    (FileKind::File, file_sum(path), None)
+    // A device, a pipe or a socket is compared by its presence only: reading
+    // one could block or never end.
+    let sum = metadata
+        .is_file()
+        .then(|| file_sum(path, TREE_BYTES))
+        .flatten();
+    (FileKind::File, sum, None)
 }
 
-fn file_sum(path: &Path) -> Option<String> {
-    let mut file = std::fs::File::open(path).ok()?;
+/// A regular file's checksum, reading at most `limit` bytes; None for
+/// anything else, or a file larger than that. The file is opened without
+/// following a link or waiting on a pipe, and checked once open, so a path
+/// swapped after it was looked at is not read either.
+fn file_sum(path: &Path, limit: u64) -> Option<String> {
+    use std::{io::Read, os::unix::fs::OpenOptionsExt};
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
+        .open(path)
+        .ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > limit {
+        return None;
+    }
     let mut hasher = Sha256::new();
-    std::io::copy(&mut file, &mut hasher).ok()?;
-    Some(hex(&hasher.finalize()))
+    let read = std::io::copy(&mut file.take(limit + 1), &mut hasher).ok()?;
+    (read <= limit).then(|| hex(&hasher.finalize()))
 }
 
 /// Hash a folder's names, kinds and contents in a fixed order; false when it
 /// is too large or unreadable to compare.
 fn tree(root: &Path, relative: &Path, hasher: &mut Sha256, budget: &mut (usize, u64)) -> bool {
+    if relative.components().count() > TREE_DEPTH {
+        return false;
+    }
     let Ok(listing) = std::fs::read_dir(root.join(relative)) else {
         return false;
     };
@@ -848,16 +876,19 @@ fn tree(root: &Path, relative: &Path, hasher: &mut Sha256, budget: &mut (usize, 
             if !tree(root, &child, hasher, budget) {
                 return false;
             }
-        } else {
+        } else if metadata.is_file() {
             if metadata.len() > budget.1 {
                 return false;
             }
-            budget.1 -= metadata.len();
             hasher.update(b"file ");
-            match file_sum(&full) {
+            match file_sum(&full, budget.1) {
                 Some(sum) => hasher.update(sum.as_bytes()),
                 None => return false,
             }
+            budget.1 -= metadata.len();
+        } else {
+            // Devices, pipes and sockets count by name only.
+            hasher.update(b"special");
         }
         hasher.update([0]);
     }
@@ -870,8 +901,15 @@ fn hex(bytes: &[u8]) -> String {
 
 /// Read and check a baseline file.
 pub fn read(path: &Path) -> Result<Baseline, BaselineError> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|error| BaselineError::Read(path.to_path_buf(), error.to_string()))?;
+    use std::io::Read;
+    let failed = |error: String| BaselineError::Read(path.to_path_buf(), error);
+    let mut text = String::new();
+    std::fs::File::open(path)
+        .and_then(|file| file.take(MAX_FILE + 1).read_to_string(&mut text))
+        .map_err(|error| failed(error.to_string()))?;
+    if text.len() as u64 > MAX_FILE {
+        return Err(failed("larger than a baseline can be".to_string()));
+    }
     let baseline: Baseline = toml::from_str(&text)
         .map_err(|error| BaselineError::Format(path.to_path_buf(), printable(error.message())))?;
     if baseline.format > FORMAT {
@@ -884,6 +922,16 @@ pub fn read(path: &Path) -> Result<Baseline, BaselineError> {
 /// Plain text throughout, ids that are ids and paths HelixForge compares: a
 /// shared file could otherwise carry escape sequences into the terminal.
 pub fn check(baseline: &Baseline) -> Result<(), BaselineError> {
+    if baseline.entries.len() > MAX_RECORDS
+        || baseline.applied.len() > MAX_RECORDS
+        || baseline.files.len() > MAX_FILES
+        || baseline.settings.len() > MAX_RECORDS
+    {
+        return Err(BaselineError::Format(
+            PathBuf::from(&baseline.name),
+            "it records more than a baseline can".to_string(),
+        ));
+    }
     let control = |text: &str| text.chars().any(char::is_control);
     let mut texts: Vec<&str> = vec![&baseline.name, &baseline.system];
     for recorded in &baseline.entries {
@@ -1302,6 +1350,26 @@ mod tests {
     }
 
     #[test]
+    fn devices_pipes_and_huge_files_are_never_read() {
+        // /dev/zero would never end; a pipe would wait for a writer.
+        let (kind, sum, _) = look(Path::new("/dev/zero"));
+        assert_eq!((kind, sum), (FileKind::File, None));
+        let directory = tempfile::tempdir().unwrap();
+        let pipe = directory.path().join("pipe");
+        nix::unistd::mkfifo(&pipe, nix::sys::stat::Mode::S_IRWXU).unwrap();
+        assert_eq!(look(&pipe).1, None);
+        let start = std::time::Instant::now();
+        let (kind, sum, _) = look(directory.path());
+        assert_eq!(kind, FileKind::Directory);
+        assert!(sum.is_some());
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        let big = directory.path().join("big");
+        std::fs::write(&big, vec![0u8; 64]).unwrap();
+        assert!(file_sum(&big, 63).is_none());
+        assert!(file_sum(&big, 64).is_some());
+    }
+
+    #[test]
     fn shared_baselines_are_checked() {
         let base = Baseline {
             name: "x".into(),
@@ -1335,6 +1403,16 @@ mod tests {
         let later = directory.path().join("later.toml");
         std::fs::write(&later, "format = 9\nname = \"x\"\nunknown = 1\n").unwrap();
         assert!(matches!(read(&later), Err(BaselineError::Later(_, 9))));
+        let huge = Baseline {
+            files: (0..1001)
+                .map(|index| FileRecord {
+                    path: format!("~/f{index}"),
+                    ..FileRecord::default()
+                })
+                .collect(),
+            ..base.clone()
+        };
+        assert!(check(&huge).is_err());
         let fine = directory.path().join("fine.toml");
         // Fields a later version adds are ignored.
         std::fs::write(&fine, "name = \"x\"\nunknown = 1\n").unwrap();
