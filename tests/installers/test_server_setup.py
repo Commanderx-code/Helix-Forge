@@ -18,7 +18,13 @@ def function(name):
 class TimezoneTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.bin = Path(self.temporary.name)
+        self.bin = Path(self.temporary.name) / 'bin'
+        self.bin.mkdir()
+        # The timezones it knows, which minimal containers lack.
+        self.zones = Path(self.temporary.name) / 'zoneinfo'
+        for zone in ('UTC', 'Europe/London'):
+            (self.zones / zone).parent.mkdir(parents=True, exist_ok=True)
+            (self.zones / zone).write_text('TZif')
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -28,7 +34,8 @@ class TimezoneTests(unittest.TestCase):
         curl.write_text(f'#!/bin/sh\n{lookup}\n')
         curl.chmod(0o755)
         try:
-            result = subprocess.run(['bash', '-c', function('timezone') + 'timezone\necho "chosen=$TIMEZONE"'],
+            program = function('timezone').replace('/usr/share/zoneinfo', str(self.zones))
+            result = subprocess.run(['bash', '-c', program + 'timezone\necho "chosen=$TIMEZONE"'],
                                     input=answers, capture_output=True, text=True, timeout=10,
                                     env={**os.environ, 'PATH': f'{self.bin}:{os.environ["PATH"]}'})
         except subprocess.TimeoutExpired:
