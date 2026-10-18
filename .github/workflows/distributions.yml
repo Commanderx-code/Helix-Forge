@@ -50,7 +50,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           toolchain: stable
-      - run: cargo test --locked --workspace
+      - run: cargo test --locked --workspace --no-fail-fast
       - run: cargo build --locked --release -p helixforge
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

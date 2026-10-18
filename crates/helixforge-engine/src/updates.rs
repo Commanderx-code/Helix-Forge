@@ -1073,9 +1073,13 @@ mod tests {
         let channel = only_this(&fake, Install::Package, true);
         assert_eq!(channel.summary(), "1 update");
         assert_eq!(channel.note, "1.0.3, the latest release is 1.0.4");
+        // The package for this machine's architecture.
+        let file = format!("helixforge-1.0.4-1-{}.pkg.tar.zst", std::env::consts::ARCH);
         assert_eq!(
             channel.command_line(),
-            "/usr/bin/helixforge fetch-release 1.0.4 helixforge-1.0.4-1-x86_64.pkg.tar.zst /home/me/.cache/helixforge/release && sudo pacman -U /home/me/.cache/helixforge/release/helixforge-1.0.4-1-x86_64.pkg.tar.zst"
+            format!(
+                "/usr/bin/helixforge fetch-release 1.0.4 {file} /home/me/.cache/helixforge/release && sudo pacman -U /home/me/.cache/helixforge/release/{file}"
+            )
         );
         // Up to date: nothing to run.
         latest(&mut fake, "v1.0.3");
