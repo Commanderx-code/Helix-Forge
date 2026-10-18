@@ -224,10 +224,12 @@ class Machine:
         self.monitor.unlink(missing_ok=True)
         self.serial = self.work / serial
         if self.cpu == 'aarch64':
-            # QEMU's generic ARM board, with a screen UEFI and Linux can draw on.
+            # QEMU's generic ARM board. Its screen is a plain framebuffer in
+            # memory, which UEFI hands to any kernel; a virtio GPU's goes dark
+            # unless the kernel has that driver, and cloud kernels do not.
             processor = (['-enable-kvm', '-cpu', 'host', '-smp', '2'] if self.native else
                          ['-accel', 'tcg,thread=multi', '-cpu', 'max,pauth-impdef=on', '-smp', '4'])
-            command = ['qemu-system-aarch64', '-machine', 'virt', *processor, '-device', 'virtio-gpu-pci']
+            command = ['qemu-system-aarch64', '-machine', 'virt', *processor, '-device', 'ramfb']
         else:
             # q35: no floppy drive, which the installer's disk menu would list first.
             command = ['qemu-system-x86_64', '-enable-kvm', '-machine', self.spec.get('chipset', 'pc'), '-cpu', 'host',
@@ -514,6 +516,11 @@ def keep_frames(frames, shots, name, firmware='bios'):
         shots.mkdir(parents=True, exist_ok=True)
         Image.open(best[3]).save(shots / f'{name}-boot.png')
         Image.open(measured[-1][3]).save(shots / f'{name}-after.png')
+        if not graphical:
+            # Nothing graphical: a spread of what was on the screen, to look at.
+            step = max(1, len(measured) // 8)
+            for number, item in enumerate(measured[::step][:8]):
+                Image.open(item[3]).save(shots / f'{name}-frame-{number}.png')
     for frame in frames:
         frame.unlink(missing_ok=True)
     return best[1] if graphical else 0
@@ -685,20 +692,24 @@ def sddm(machine, shots):
     if not machine.ok('test -f /usr/share/sddm/themes/silent/metadata.desktop'):
         raise RuntimeError('the theme is not installed')
     machine.reboot(shots, 'sddm')
-    for _ in range(30):
+    for _ in range(30 * machine.pace):
         if machine.ok('systemctl is-active sddm'):
             break
         time.sleep(2)
     else:
         raise RuntimeError('SDDM is not running after the reboot')
-    time.sleep(10)
+    # The greeter draws in software, which emulation slows down.
+    time.sleep(10 * machine.pace)
     if shots:
         machine.screen(machine.work / 'greeter.ppm')
         size, count = colors(machine.work / 'greeter.ppm')
         from PIL import Image
         Image.open(machine.work / 'greeter.ppm').save(shots / 'sddm-greeter.png')
         if count < 60:
-            raise RuntimeError(f'no graphical login screen was seen ({count} colors)')
+            # What SDDM and the display said, to tell why.
+            said = machine.ssh('ls /dev/dri; sudo journalctl -b -u sddm --no-pager | tail -n 15',
+                               check=False).stdout
+            raise RuntimeError(f'no graphical login screen was seen ({count} colors)\n{said}')
 
 
 def ssd_trim(machine, shots):
