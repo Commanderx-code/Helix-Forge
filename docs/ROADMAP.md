@@ -55,7 +55,7 @@ The items:
       left out on ARM64, and blocked when named anyway
 - [x] Updates, `fetch-release` and `start.sh` choose this machine's files
 - [x] An Arch package for Arch Linux ARM, tested in Arch Linux ARM's own
-      root file system, checked against its build key (v1.6.1)
+      root file system, checked against its build key
 - [ ] The virtual machines on ARM64
 
 ## v1.5.0: machines without reliable internet (done)
