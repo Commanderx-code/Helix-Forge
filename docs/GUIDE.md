@@ -215,7 +215,7 @@ helixforge report                 # for a bug report
 | Path | What |
 |---|---|
 | `~/.config/helixforge/settings.toml` | Theme, icons and the other settings |
-| `~/.config/helixforge/favourites.toml` | Pinned entries |
+| `~/.config/helixforge/favorites.toml` | Pinned entries |
 | `~/.config/helixforge/profiles/` | Your profiles |
 | `~/.config/helixforge/baselines/` | Your baselines, for Drift |
 | `~/.config/helixforge/looks/` | Your saved desktop looks |

@@ -190,9 +190,6 @@ pub fn trust(catalog: &Catalog, platform: &LinuxInfo, id: &str, as_json: bool) -
                 "sha256": found.sha256,
                 "license": found.license,
                 "software_license": found.software_license,
-                // The same, under the names HelixForge 1.2 gave them.
-                "licence": found.license,
-                "software_licence": found.software_license,
                 "provenance": facts(&found.provenance),
                 "integrity": facts(&found.integrity),
                 "downloads": facts(&found.downloads),

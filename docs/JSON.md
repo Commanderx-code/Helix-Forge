@@ -171,9 +171,7 @@ system.
 `{id, name, kind, origin, file, sha256, license, software_license,
 provenance, integrity, downloads, privileges, validation}`. `file` and
 `sha256` are the installer script's, relative to the scripts folder;
-`software_license` is what the package manager reports, or `null`;
-`licence` and `software_licence`, the names they had before 1.5.8, carry the
-same values, and stay for programs that read them. Each of
+`software_license` is what the package manager reports, or `null`. Each of
 `provenance`, `integrity` and `downloads` is a list of `{standing, label,
 subject, text}`, `standing` being `provenance` (signed build provenance),
 `checked` (a checksum or signature a tool checks), `pinned` (fixed to a

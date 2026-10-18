@@ -34,7 +34,7 @@ were on. `i` cycles the list between all entries, installed ones (including
 those managed by Nix) and ones with an update, flattening the groups of the
 area. `*` pins the selected entry; **Favorites** lists pinned entries, then
 the ones run recently, from History, and is also a quick action on the
-Dashboard. Pins are kept in `~/.config/helixforge/favourites.toml`. Each area
+Dashboard. Pins are kept in `~/.config/helixforge/favorites.toml`. Each area
 remembers its group and row when you move to another.
 
 The menu follows the HelixForge dashboard design: cards for the main screens
