@@ -97,7 +97,10 @@ MACHINES = {
     # Its firmware names Valve as the board's maker, as a Steam Deck's does.
     'steamdeck': {'image': 'arch', 'family': 'arch', 'firmware': 'bios', 'smbios': 'type=2,manufacturer=Valve'},
     # ARM64 machines, which boot through UEFI.
-    'debian-arm64': {'image': 'debian-arm64', 'family': 'debian', 'firmware': 'uefi', 'cpu': 'aarch64'},
+    # Debian's ARM kernel drives the UEFI framebuffer with efifb, which makes no
+    # /dev/dri for SDDM to wait on; its own kernel has the virtio GPU driver.
+    'debian-arm64': {'image': 'debian-arm64', 'family': 'debian', 'firmware': 'uefi', 'cpu': 'aarch64',
+                     'display': 'virtio-gpu-pci'},
     'fedora-arm64': {'image': 'fedora-arm64', 'family': 'fedora', 'firmware': 'uefi', 'cpu': 'aarch64'},
 }
 
@@ -225,11 +228,13 @@ class Machine:
         self.serial = self.work / serial
         if self.cpu == 'aarch64':
             # QEMU's generic ARM board. Its screen is a plain framebuffer in
-            # memory, which UEFI hands to any kernel; a virtio GPU's goes dark
-            # unless the kernel has that driver, and cloud kernels do not.
+            # memory unless the machine names another, which UEFI hands to any
+            # kernel; a virtio GPU's goes dark unless the kernel has that driver,
+            # and cloud kernels do not.
             processor = (['-enable-kvm', '-cpu', 'host', '-smp', '2'] if self.native else
                          ['-accel', 'tcg,thread=multi', '-cpu', 'max,pauth-impdef=on', '-smp', '2'])
-            command = ['qemu-system-aarch64', '-machine', 'virt', *processor, '-device', 'ramfb']
+            command = ['qemu-system-aarch64', '-machine', 'virt', *processor,
+                       '-device', self.spec.get('display', 'ramfb')]
         else:
             # q35: no floppy drive, which the installer's disk menu would list first.
             command = ['qemu-system-x86_64', '-enable-kvm', '-machine', self.spec.get('chipset', 'pc'), '-cpu', 'host',
