@@ -9,9 +9,12 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
 - **The last British spellings go**: pinned entries are kept in
   `favorites.toml`. Pins in `favourites.toml` are read and moved on the
   next pin, and the old name is left as a link to the new file, so an
-  earlier 1.x still finds them. `trust --json` no longer has `licence` and
-  `software_licence`; read `license` and `software_license`, which 1.5.8
-  added with the same values. This is the one exception to the promise
+  earlier 1.x still finds them.
+- **Clearer license fields**: `trust --json` names whose license each one
+  is: `installer_license` for HelixForge's installer script and
+  `package_license` for the software it installs. They replace `license`
+  and `software_license` (1.5.8) and `licence` and `software_licence`
+  (before it), which are gone. This is the one exception to the promise
   that schema 1 fields are never removed.
 
 ## v1.5.8
