@@ -78,7 +78,7 @@ and press `Enter`.
 7. The run asks `[Y]` first, then shows its output in a window inside the
    menu. Type into it when an installer asks a question. `Ctrl-C` stops it;
    `l` saves the log.
-8. Afterwards HelixForge checks each package with the package manager and
+8. Afterward HelixForge checks each package with the package manager and
    says what it verified. Anything that did not finish stays in the Install
    Plan to run again.
 

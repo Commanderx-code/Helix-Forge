@@ -178,7 +178,7 @@ upgrade`, `zypper update`), and on Arch one `sudo pacman -Syu` for all of them
 with a note that pacman does not support updating one package alone (risk
 high). Each step carries `UpdateTarget`s: the entry, the probe that finds its
 package and its version before. The shell program fails if a target is gone
-afterwards; `verify()` gathers a fresh inventory and passes a target only when
+afterward; `verify()` gathers a fresh inventory and passes a target only when
 its version changed. Entries that are up to date, managed by Nix, installed
 elsewhere, absent or scripts become notes.
 

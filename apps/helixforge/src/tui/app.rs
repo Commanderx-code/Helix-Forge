@@ -1366,7 +1366,7 @@ impl App {
     }
 
     /// Fill a card's inside, so the fill never reaches past its rounded
-    /// border; draw the card's widget over it afterwards.
+    /// border; draw the card's widget over it afterward.
     fn fill(&self, frame: &mut Frame, area: Rect) {
         let inside = Block::bordered().inner(area);
         frame.render_widget(Block::default().style(self.theme.card()), inside);

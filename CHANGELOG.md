@@ -16,6 +16,8 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   and `software_license` (1.5.8) and `licence` and `software_licence`
   (before it), which are gone. This is the one exception to the promise
   that schema 1 fields are never removed.
+- **US forms**: toward, afterward and backward replace towards, afterwards
+  and backwards in the interface, catalog and documentation.
 
 ## v1.5.8
 
