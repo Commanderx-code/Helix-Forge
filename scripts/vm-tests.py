@@ -677,9 +677,10 @@ def apparmor(machine, shots):
 
 
 def sddm(machine, shots):
-    # SDDM, and a display for the installer's preview of the theme.
+    # SDDM, and a display for the installer's preview of the theme. Debian's
+    # SDDM takes any X server, and Xvfb counts: name the real one.
     install = {'arch': 'sudo pacman -S --noconfirm --needed sddm xorg-server-xvfb imagemagick >/dev/null',
-               'debian': 'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q sddm xvfb imagemagick >/dev/null',
+               'debian': 'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q sddm xserver-xorg xvfb imagemagick >/dev/null',
                'fedora': 'sudo dnf install -y -q sddm xorg-x11-server-Xvfb ImageMagick >/dev/null'}
     machine.ssh(install[machine.distro])
     machine.ssh('setsid nohup Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 < /dev/null &')
@@ -724,7 +725,7 @@ def sddm(machine, shots):
         Image.open(machine.work / 'greeter.ppm').save(shots / 'sddm-greeter.png')
         if count < 60:
             # What SDDM and the display said, to tell why.
-            said = machine.ssh('ls /dev/dri; sudo journalctl -b -u sddm --no-pager | tail -n 15',
+            said = machine.ssh('ls /dev/dri; ls -l /usr/bin/X; sudo journalctl -b -u sddm --no-pager | tail -n 15',
                                check=False).stdout
             raise RuntimeError(f'no graphical login screen was seen ({count} colors)\n{said}')
 
