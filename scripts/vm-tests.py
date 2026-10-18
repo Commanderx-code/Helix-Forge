@@ -228,7 +228,7 @@ class Machine:
             # memory, which UEFI hands to any kernel; a virtio GPU's goes dark
             # unless the kernel has that driver, and cloud kernels do not.
             processor = (['-enable-kvm', '-cpu', 'host', '-smp', '2'] if self.native else
-                         ['-accel', 'tcg,thread=multi', '-cpu', 'max,pauth-impdef=on', '-smp', '4'])
+                         ['-accel', 'tcg,thread=multi', '-cpu', 'max,pauth-impdef=on', '-smp', '2'])
             command = ['qemu-system-aarch64', '-machine', 'virt', *processor, '-device', 'ramfb']
         else:
             # q35: no floppy drive, which the installer's disk menu would list first.
@@ -406,6 +406,18 @@ class Machine:
         else:
             self.ssh('sudo apt-get update -q >/dev/null && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q git python3 >/dev/null')
             regenerate = 'sudo update-grub'
+            if self.cpu == 'aarch64':
+                # Debian's cloud kernel for ARM64 has no graphics driver at
+                # all, so no login screen can start; a desktop has the
+                # distribution's own kernel.
+                self.ssh('sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q linux-image-arm64 >/dev/null && '
+                         "sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y -q 'linux-image-*cloud*' >/dev/null")
+                before = self.boot_id()
+                self.ssh('sudo systemctl reboot', check=False)
+                time.sleep(10)
+                self.wait()
+                if self.boot_id() == before or 'cloud' in self.ssh('uname -r').stdout:
+                    raise RuntimeError('the machine did not start its new kernel')
         # The cloud images send GRUB and the kernel's console to the serial
         # line, which also keeps Plymouth's splash away, and hide the menu.
         self.ssh("sudo sed -i -e '/^GRUB_TERMINAL\\(_INPUT\\|_OUTPUT\\)\\{0,1\\}=/d' -e '/^GRUB_SERIAL_COMMAND=/d' "
@@ -1074,6 +1086,10 @@ def main():
             except Exception as error:  # every case is reported, then the run fails
                 failures[entry] = str(error)[-2000:]
                 log(f'{entry}: FAILED: {error}')
+                # What the machine printed, for a person to read.
+                if options.shots and getattr(machine, 'serial', None) and machine.serial.exists():
+                    options.shots.mkdir(parents=True, exist_ok=True)
+                    (options.shots / f'{entry}-serial.log').write_bytes(machine.serial.read_bytes())
                 try:
                     machine.wait(patience=60)
                 except RuntimeError:
