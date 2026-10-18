@@ -9,7 +9,9 @@
 record=${1:?usage: scripts/arch-arm-tests.sh RECORD}
 
 # Its keyring, then the tools the tests need. The kernel and firmware are
-# not upgraded: nothing boots here.
+# not upgraded: nothing boots here. pacman's download sandbox needs system
+# calls a container does not allow.
+sed -i '/^\[options\]/a DisableSandbox' /etc/pacman.conf
 pacman-key --init
 pacman-key --populate archlinuxarm
 pacman -Syu --noconfirm --needed --ignore linux-aarch64,linux-firmware sudo git python which

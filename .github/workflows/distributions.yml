@@ -85,10 +85,6 @@ jobs:
         with:
           name: packages-aarch64
           path: packages
-      - name: Hardware virtualization on this runner
-        run: |
-          ls -l /dev/kvm || echo "no /dev/kvm"
-          cat /sys/module/kvm/parameters/* 2>/dev/null || true
       - name: The Arch Linux ARM root file system, checked against its build key
         run: |
           url=http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz
