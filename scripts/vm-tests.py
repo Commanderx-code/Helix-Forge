@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import select
 import shlex
@@ -60,6 +61,21 @@ IMAGES = {
         'hash': 'sha256',
         'admins': 'wheel',
     },
+    # The same distributions for ARM64.
+    'debian-arm64': {
+        'url': 'https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-arm64.qcow2',
+        'sums': 'https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS',
+        'hash': 'sha512',
+        'admins': 'sudo',
+    },
+    'fedora-arm64': {
+        'url': 'https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/aarch64/images/'
+               'Fedora-Cloud-Base-Generic-44-1.7.aarch64.qcow2',
+        'sums': 'https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/aarch64/images/'
+                'Fedora-Cloud-44-1.7-aarch64-CHECKSUM',
+        'hash': 'sha256',
+        'admins': 'wheel',
+    },
     'archiso': {
         'url': 'https://geo.mirror.pkgbuild.com/iso/latest/archlinux-x86_64.iso',
         'sums': 'https://geo.mirror.pkgbuild.com/iso/latest/sha256sums.txt',
@@ -80,6 +96,9 @@ MACHINES = {
     'arch-iso': {'image': 'archiso', 'family': 'arch', 'firmware': 'uefi', 'live': True, 'chipset': 'q35'},
     # Its firmware names Valve as the board's maker, as a Steam Deck's does.
     'steamdeck': {'image': 'arch', 'family': 'arch', 'firmware': 'bios', 'smbios': 'type=2,manufacturer=Valve'},
+    # ARM64 machines, which boot through UEFI.
+    'debian-arm64': {'image': 'debian-arm64', 'family': 'debian', 'firmware': 'uefi', 'cpu': 'aarch64'},
+    'fedora-arm64': {'image': 'fedora-arm64', 'family': 'fedora', 'firmware': 'uefi', 'cpu': 'aarch64'},
 }
 
 # UEFI firmware, where Debian, Ubuntu, Fedora and Arch put it.
@@ -89,6 +108,12 @@ OVMF = [
     ('/usr/share/edk2/ovmf/OVMF_CODE.fd', '/usr/share/edk2/ovmf/OVMF_VARS.fd'),
 ]
 
+# ARM64's UEFI firmware, where Debian and Ubuntu, then Fedora, put it.
+AAVMF = [
+    ('/usr/share/AAVMF/AAVMF_CODE.fd', '/usr/share/AAVMF/AAVMF_VARS.fd'),
+    ('/usr/share/edk2/aarch64/QEMU_EFI-pflash.raw', '/usr/share/edk2/aarch64/vars-template-pflash.raw'),
+]
+
 PORT = 2222
 
 
@@ -96,18 +121,18 @@ def log(message):
     print(f'vm-tests: {message}', flush=True)
 
 
-def firmware_options(kind, vars_file):
+def firmware_options(kind, vars_file, cpu='x86_64'):
     """QEMU's options for BIOS or UEFI firmware, UEFI's variables kept in
     `vars_file` from one start to the next."""
     if kind != 'uefi':
         return []
-    for code, template in OVMF:
+    for code, template in AAVMF if cpu == 'aarch64' else OVMF:
         if Path(code).exists() and Path(template).exists():
             if not vars_file.exists():
                 vars_file.write_bytes(Path(template).read_bytes())
             return ['-drive', f'if=pflash,format=raw,readonly=on,file={code}',
                     '-drive', f'if=pflash,format=raw,file={vars_file}']
-    sys.exit('no UEFI firmware (OVMF) is installed')
+    sys.exit('no UEFI firmware (OVMF or AAVMF) is installed')
 
 
 ANSI = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-Z0-9]|\r')
@@ -130,6 +155,11 @@ class Machine:
         self.key = work / 'key'
         self.disk = work / 'disk.qcow2'
         self.vars = work / 'vars.fd'
+        self.cpu = self.spec.get('cpu', 'x86_64')
+        # Another processor than this one's is emulated, several times slower:
+        # everything is given that much longer.
+        self.native = self.cpu == platform.machine() and Path('/dev/kvm').exists()
+        self.pace = 1 if self.native else 6
         # Unix socket paths are short: a private folder of its own in /tmp.
         self.monitor = Path(tempfile.mkdtemp(prefix='hf-vm-', dir='/tmp')) / 'monitor'
 
@@ -193,12 +223,18 @@ class Machine:
     def launch(self, drives, serial='serial.log', network=True):
         self.monitor.unlink(missing_ok=True)
         self.serial = self.work / serial
-        # q35: no floppy drive, which the installer's disk menu would list first.
-        command = ['qemu-system-x86_64', '-enable-kvm', '-machine', self.spec.get('chipset', 'pc'), '-cpu', 'host',
-                   '-m', '4096', '-smp', '2',
-                   *firmware_options(self.spec['firmware'], self.vars), *drives,
-                   '-display', 'none', '-vga', 'std', '-monitor', f'unix:{self.monitor},server,nowait',
-                   '-serial', f'file:{self.work / serial}', '-daemonize', '-pidfile', str(self.work / 'qemu.pid')]
+        if self.cpu == 'aarch64':
+            # QEMU's generic ARM board, with a screen UEFI and Linux can draw on.
+            processor = (['-enable-kvm', '-cpu', 'host', '-smp', '2'] if self.native else
+                         ['-accel', 'tcg,thread=multi', '-cpu', 'max,pauth-impdef=on', '-smp', '4'])
+            command = ['qemu-system-aarch64', '-machine', 'virt', *processor, '-device', 'virtio-gpu-pci']
+        else:
+            # q35: no floppy drive, which the installer's disk menu would list first.
+            command = ['qemu-system-x86_64', '-enable-kvm', '-machine', self.spec.get('chipset', 'pc'), '-cpu', 'host',
+                       '-smp', '2', '-vga', 'std']
+        command += ['-m', '4096', *firmware_options(self.spec['firmware'], self.vars, self.cpu), *drives,
+                    '-display', 'none', '-monitor', f'unix:{self.monitor},server,nowait',
+                    '-serial', f'file:{self.work / serial}', '-daemonize', '-pidfile', str(self.work / 'qemu.pid')]
         if network:
             # Restricted: SSH still reaches it, but it reaches nothing.
             restrict = ',restrict=on' if network == 'restricted' else ''
@@ -262,7 +298,7 @@ class Machine:
     def gone(self, patience=120):
         """Wait for QEMU to end, after a power-off."""
         pid = self.work / 'qemu.pid'
-        deadline = time.time() + patience
+        deadline = time.time() + patience * self.pace
         while time.time() < deadline:
             if not pid.exists() or not Path(f'/proc/{pid.read_text().strip()}').exists():
                 return
@@ -285,7 +321,7 @@ class Machine:
         return self.ssh(command, check=False).returncode == 0
 
     def wait(self, patience=240):
-        deadline = time.time() + patience
+        deadline = time.time() + patience * self.pace
         while time.time() < deadline:
             try:
                 with socket.create_connection(('127.0.0.1', self.port), timeout=3):
@@ -322,7 +358,7 @@ class Machine:
         """Capture the screen every half second until `done()` holds; the
         frames, oldest first."""
         frames = []
-        deadline = time.time() + patience
+        deadline = time.time() + patience * self.pace
         index = 0
         while time.time() < deadline:
             frame = self.work / f'frame-{index:03}.ppm'
@@ -410,7 +446,7 @@ class Machine:
             (r'\(default=1\):', ''), (r'\(default=all\):', '')]
         output = b''
         answered = 0
-        deadline = time.time() + 2400
+        deadline = time.time() + 2400 * self.pace
         while time.time() < deadline:
             ready, _, _ = select.select([process.stdout], [], [], 1)
             if ready:
@@ -987,6 +1023,13 @@ CASES = {
     'opensuse': [('bundle-zypper', zypper_bundle)],
     'arch-iso': [('arch-server-setup', server_setup)],
     'steamdeck': [('linux-neptune-for-steamdeck', linux_neptune)],
+    # What also applies on ARM64 boards and servers that boot through UEFI.
+    'debian-arm64': [('grub-dracula', grub_theme), ('grub-default', grub_default), ('plymouth-on', plymouth_on),
+                     ('plymouth-off', plymouth_off), ('apparmor', apparmor), ('sddm', sddm),
+                     ('enable-ssd-trim', ssd_trim)],
+    'fedora-arm64': [('grub-dracula', grub_theme), ('grub-default', grub_default), ('plymouth-on', plymouth_on),
+                     ('plymouth-off', plymouth_off), ('selinux', selinux), ('sddm', sddm),
+                     ('enable-ssd-trim', ssd_trim)],
 }
 
 
