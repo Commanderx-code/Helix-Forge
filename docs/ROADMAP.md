@@ -56,7 +56,8 @@ The items:
 - [x] Updates, `fetch-release` and `start.sh` choose this machine's files
 - [x] An Arch package for Arch Linux ARM, tested in Arch Linux ARM's own
       root file system, checked against its build key
-- [ ] The virtual machines on ARM64
+- [x] The virtual machines on ARM64: Debian and Fedora, emulated, weekly
+      and on request
 
 ## v1.5.0: machines without reliable internet (done)
 
