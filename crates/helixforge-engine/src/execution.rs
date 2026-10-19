@@ -360,8 +360,9 @@ fn monitor(
         queue: VecDeque::new(),
         transcript,
     };
+    // Before any output, however much the program has written already.
     for event in first {
-        outlet.after_output_so_far(event);
+        outlet.next(event);
     }
     let mut steps = StepFile {
         path: shared.status.clone(),
@@ -923,6 +924,29 @@ mod tests {
         assert_eq!(records.len(), 1, "recorded once");
         assert!(records[0].success);
         assert_eq!(records[0].entries, ["one", "two"]);
+    }
+
+    #[test]
+    fn the_first_events_come_before_output_the_program_already_wrote() {
+        let (sender, receiver) = mpsc::sync_channel(8);
+        let mut outlet = Outlet {
+            sender,
+            connected: true,
+            sent: 0,
+            queue: VecDeque::new(),
+            transcript: Arc::new(Mutex::new(b"early".to_vec())),
+        };
+        let first = ExecutionEvent::Warning("first".into());
+        outlet.next(first.clone());
+        outlet.pump();
+        assert_eq!(receiver.try_recv().unwrap(), first);
+        assert_eq!(
+            receiver.try_recv().unwrap(),
+            ExecutionEvent::Output {
+                offset: 0,
+                bytes: b"early".to_vec()
+            }
+        );
     }
 
     #[test]
