@@ -18,6 +18,7 @@ script exit 1. Nothing here touches the machine running it beyond the work
 folder.
 """
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -363,21 +364,29 @@ class Machine:
 
     def watch(self, done, patience=240):
         """Capture the screen every half second until `done()` holds; the
-        frames, oldest first."""
+        frames, oldest first. `done()` runs beside the captures: an SSH probe
+        of a machine still booting can take seconds, as long as a boot menu
+        stays up."""
         frames = []
         deadline = time.time() + patience * self.pace
         index = 0
-        while time.time() < deadline:
-            frame = self.work / f'frame-{index:03}.ppm'
-            try:
-                self.screen(frame)
-                frames.append(frame)
-            except OSError:
-                pass
-            index += 1
-            time.sleep(0.5)
-            if index > 20 and index % 4 == 0 and done():
-                break
+        checking = None
+        with concurrent.futures.ThreadPoolExecutor(1) as pool:
+            while time.time() < deadline:
+                frame = self.work / f'frame-{index:03}.ppm'
+                try:
+                    self.screen(frame)
+                    frames.append(frame)
+                except OSError:
+                    pass
+                index += 1
+                time.sleep(0.5)
+                if checking and checking.done():
+                    if checking.result():
+                        break
+                    checking = None
+                if checking is None and index > 20:
+                    checking = pool.submit(done)
         return frames
 
     def reboot(self, shots, name):
