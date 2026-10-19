@@ -225,9 +225,9 @@ mod tests {
         picker.set_protocol_type(ProtocolType::Kitty);
         let banner = encode(&picker).expect("the built-in banner encodes");
         assert_eq!(banner.size().height, ROWS);
-        // 4 rows of 19 pixels at the banner's 2.9:1 shape, in 9-pixel columns.
+        // 4 rows of 19 pixels at the banner's 2.6:1 shape, in 9-pixel columns.
         assert!(
-            (23..=25).contains(&banner.size().width),
+            (21..=23).contains(&banner.size().width),
             "{:?}",
             banner.size()
         );
