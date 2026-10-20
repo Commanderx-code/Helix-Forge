@@ -245,3 +245,30 @@ export type SettingsView = {
   path: string | null;
   theme: WindowTheme;
 };
+
+// Offline bundles
+
+export type BundledEntry = { name: string; offline: boolean; network: string | null; flatpak: string | null };
+
+/** What a bundle of some entries would hold, before anything is downloaded. */
+export type BundleContents = {
+  entries: BundledEntry[];
+  files: number;
+  dnf: string[];
+  zypper: string[];
+  flatpaks: string[];
+};
+
+/** A bundle that matched its checksums. */
+export type BundleView = {
+  distribution: string;
+  architecture: string;
+  version: string;
+  release: boolean;
+  created: string;
+  complete: boolean;
+  files: number;
+  bytes: number;
+  flatpaks: string[];
+  entries: BundledEntry[];
+};

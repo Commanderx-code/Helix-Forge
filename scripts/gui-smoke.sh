@@ -1,9 +1,9 @@
 #!/bin/sh -e
 
 # Drive a debug build of the window through the setup wizard, the command
-# palette, the theme, every screen, a run with its change preview and a
-# saved profile, against the fixture catalog, and check what the drive
-# script reports.
+# palette, the theme, every screen, a run with its change preview, a
+# saved profile and the offline bundles screen, against the fixture
+# catalog, and check what the drive script reports.
 # usage: scripts/gui-smoke.sh BINARY
 # BINARY is a debug build with the frontend in it (cargo build --features
 # tauri/custom-protocol in apps/helix-toolbox-gui/src-tauri, after npm run

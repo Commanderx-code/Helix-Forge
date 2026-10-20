@@ -270,6 +270,51 @@ export async function call(command: string, args: Record<string, unknown> = {}):
       ];
     case 'setup_done':
       return undefined;
+    case 'bundle_contents':
+      return {
+        entries: (args.ids as string[]).map((id) => {
+          const known = find(id);
+          const offline = known?.kind === 'package';
+          return { name: known?.name ?? id, offline, network: offline ? null : 'a script, which downloads as it runs', flatpak: null };
+        }),
+        files: args.complete ? 41 : 7,
+        dnf: [],
+        zypper: [],
+        flatpaks: [],
+      };
+    case 'prepare_bundle_create':
+      return {
+        kind: 'ready',
+        risk: 'low',
+        privileged: false,
+        header: ['Risk: low', 'Note: It downloads the packages into the folder and installs nothing on this machine.'],
+        lines: [{ name: `Make a bundle in ${args.directory}`, detail: `/usr/bin/helix-toolbox bundle create ${args.directory} ${(args.ids as string[]).join(' ')}` }],
+      } satisfies Prepared;
+    case 'bundle_check':
+      if (!String(args.directory).includes('bundle')) throw new Error(`${args.directory} is not a Helix Toolbox bundle: it has no bundle.toml`);
+      return {
+        distribution: 'Sample Linux',
+        architecture: 'x86_64',
+        version: '1.12.0',
+        release: true,
+        created: '2026-10-20 18:30',
+        complete: false,
+        files: 9,
+        bytes: 48_200_000,
+        flatpaks: [],
+        entries: [
+          { name: 'Ripgrep', offline: true, network: null, flatpak: null },
+          { name: 'Neovim', offline: true, network: null, flatpak: null },
+        ],
+      };
+    case 'prepare_bundle_install':
+      return {
+        kind: 'ready',
+        risk: 'medium',
+        privileged: true,
+        header: ['Risk: medium · asks for your password', 'Note: The packages are checked against the bundle\'s checksums and signatures first.'],
+        lines: [{ name: 'Install the bundle\'s packages', detail: 'sudo pacman -U --needed packages/*.pkg.tar.zst' }],
+      } satisfies Prepared;
     case 'save_theme':
       theme = args.theme as WindowTheme;
       return call('read_settings');

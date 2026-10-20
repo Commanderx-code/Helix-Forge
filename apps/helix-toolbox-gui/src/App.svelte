@@ -16,6 +16,7 @@
   import Drift from './screens/Drift.svelte';
   import Reliability from './screens/Reliability.svelte';
   import Hardware from './screens/Hardware.svelte';
+  import Bundles from './screens/Bundles.svelte';
   import Desktop from './screens/Desktop.svelte';
   import Settings from './screens/Settings.svelte';
   import Dialogs from './components/Dialogs.svelte';
@@ -63,6 +64,8 @@
         <Reliability />
       {:else if toolbox.screen.kind === 'hardware'}
         <Hardware />
+      {:else if toolbox.screen.kind === 'bundles'}
+        <Bundles />
       {:else if toolbox.screen.kind === 'desktop'}
         <Desktop />
       {:else if toolbox.screen.kind === 'settings'}

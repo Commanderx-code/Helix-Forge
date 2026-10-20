@@ -43,6 +43,7 @@
   {@render item({ kind: 'drift' }, 'drift', 'Drift')}
   {@render item({ kind: 'reliability' }, 'flask', 'Reliability')}
   {@render item({ kind: 'hardware' }, 'chip', 'Hardware')}
+  {@render item({ kind: 'bundles' }, 'package', 'Offline bundles')}
   {@render item({ kind: 'desktop' }, 'monitor', 'Desktop')}
   {@render item({ kind: 'settings' }, 'gear', 'Settings')}
 </nav>

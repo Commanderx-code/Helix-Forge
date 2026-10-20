@@ -15,6 +15,11 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   light or dark color scheme, and changes with it; Settings can keep it
   dark or light instead. The run's terminal stays dark, as programs
   expect.
+- **Offline bundles in the window.** A new screen bundles the Install
+  Plan's entries for a machine without reliable internet, says first
+  which go offline and what is downloaded, and checks a bundle and
+  installs from it, each after confirmation, as `helix-toolbox bundle`
+  does.
 - **The terminal interface keeps the window's settings.** Saving its
   Settings rewrote `settings.toml` with only its own, which would have
   dropped the window's theme; it now leaves the others as they are.

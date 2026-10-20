@@ -108,6 +108,14 @@ The other tools, under **More tools** in the sidebar:
 - **Hardware**: firmware updates through fwupd (typing FIRMWARE first, as
   in the terminal interface), disks with **Check health…** (SMART, after
   confirmation), temperatures, batteries, and the PCI and USB devices.
+- **Offline bundles**: the Install Plan's entries and the packages they
+  need, downloaded with Helix Toolbox into a new folder for a machine of
+  the same distribution without reliable internet. **Check what it
+  needs** says which entries go offline and what is downloaded; **Make
+  the bundle…** runs `helix-toolbox bundle create` in the run's terminal
+  and installs nothing here. **Check it** verifies a bundle (made for this
+  machine, every file matching its checksum); **Install from it…**
+  installs its packages from its files after confirmation.
 - **Desktop**: the running desktop and its appearance, **Save this look**,
   the saved looks put back after confirmation, and the entries for this
   desktop.

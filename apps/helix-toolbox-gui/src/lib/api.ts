@@ -7,6 +7,8 @@ import type {
   About,
   AreaView,
   BackupsView,
+  BundleContents,
+  BundleView,
   ChangesView,
   DesktopView,
   Diagnosis,
@@ -75,6 +77,14 @@ export const prepareSmart = (disk: string) => call<Prepared>('prepare_smart', { 
 export const desktop = () => call<DesktopView>('read_desktop');
 export const saveLook = (name: string) => call<string>('save_look', { name });
 export const prepareLook = (slug: string) => call<Prepared>('prepare_look', { slug });
+
+export const bundleContents = (ids: string[], complete: boolean) =>
+  call<BundleContents>('bundle_contents', { ids, complete });
+export const prepareBundleCreate = (directory: string, ids: string[], complete: boolean) =>
+  call<Prepared>('prepare_bundle_create', { directory, ids, complete });
+export const bundleCheck = (directory: string) => call<BundleView>('bundle_check', { directory });
+export const prepareBundleInstall = (directory: string, trust: boolean) =>
+  call<Prepared>('prepare_bundle_install', { directory, trust });
 
 export const setupStart = () => call<SetupView>('setup_start');
 export const setupChoose = (id: string) => call<PickView[]>('setup_choose', { id });

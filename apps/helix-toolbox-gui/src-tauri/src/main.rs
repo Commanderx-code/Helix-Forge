@@ -9,7 +9,7 @@ mod views;
 use helix_toolbox_catalog::Catalog;
 use helix_toolbox_core::{Action, Entry};
 use helix_toolbox_engine::{
-    Plan, backups,
+    Plan, backups, bundle,
     confirmation::{self, Prepared},
     desktop, doctor, drift,
     execution::{Execution, Options},
@@ -31,8 +31,8 @@ use std::{
 };
 use tauri::{AppHandle, Manager, State, ipc::Channel};
 use views::{
-    AreaView, BackupView, ChangesView, ChannelView, DiagnosisView, PreparedView, RecordView,
-    StatusView,
+    AreaView, BackupView, BundleContentsView, BundleView, ChangesView, ChannelView, DiagnosisView,
+    PreparedView, RecordView, StatusView,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -1111,6 +1111,136 @@ async fn prepare_look(app: AppHandle, slug: String) -> Result<PreparedView, Stri
     .await
 }
 
+// Offline bundles
+
+/// A folder as the user typed it: `~` is the home folder; anything else
+/// must be a full path.
+fn folder(text: &str) -> Result<PathBuf, String> {
+    let text = text.trim();
+    let home = || {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or_else(|| "there is no home folder".to_string())
+    };
+    let path = match text.strip_prefix("~/") {
+        Some(rest) => home()?.join(rest),
+        None if text == "~" => home()?,
+        None => PathBuf::from(text),
+    };
+    if text.is_empty() || !path.is_absolute() {
+        return Err("Give the folder's full path, such as ~/helix-toolbox-bundle.".to_string());
+    }
+    Ok(path)
+}
+
+/// What a bundle of these entries would hold; it downloads nothing.
+#[tauri::command]
+async fn bundle_contents(
+    app: AppHandle,
+    ids: Vec<String>,
+    complete: bool,
+) -> Result<BundleContentsView, String> {
+    blocking(app, move |gui| {
+        let catalog = gui.catalog.read().unwrap();
+        let scratch = bundle::scratch()
+            .map_err(|error| format!("cannot create a scratch folder: {error}"))?;
+        let found = bundle::contents(
+            &ids,
+            &catalog,
+            &gui.platform,
+            complete,
+            &doctor::Here,
+            &scratch,
+        );
+        let _ = std::fs::remove_dir_all(&scratch);
+        found
+            .map(|found| views::bundle_contents(&found))
+            .map_err(|error| error.to_string())
+    })
+    .await?
+}
+
+/// Plan making a bundle of these entries in a new or empty folder, which
+/// the command line does in the run's terminal.
+#[tauri::command]
+async fn prepare_bundle_create(
+    app: AppHandle,
+    directory: String,
+    ids: Vec<String>,
+    complete: bool,
+) -> Result<PreparedView, String> {
+    blocking(app, move |gui| {
+        let catalog = gui.catalog.read().unwrap();
+        let planned = (|| {
+            if ids.is_empty() {
+                return Err("Queue the entries to bundle in the Install Plan first.".to_string());
+            }
+            if let Some(id) = ids.iter().find(|id| catalog.find(id).is_none()) {
+                return Err(format!("There is no entry {id} in the catalog."));
+            }
+            let directory = folder(&directory)?;
+            if std::fs::read_dir(&directory).is_ok_and(|mut listing| listing.next().is_some()) {
+                return Err(bundle::BundleError::NotEmpty(directory).to_string());
+            }
+            if !gui.this.is_absolute() {
+                return Err(
+                    "The command line, helix-toolbox, makes the bundle, and it was not found."
+                        .to_string(),
+                );
+            }
+            Ok(bundle::plan_create(&gui.this, &directory, &ids, complete))
+        })();
+        match planned {
+            Ok(planned) => prepare_plan(gui, &catalog, planned),
+            Err(why) => cannot(gui, why),
+        }
+    })
+    .await
+}
+
+/// Check a bundle: made for this machine, every file matching its checksum.
+#[tauri::command]
+async fn bundle_check(app: AppHandle, directory: String) -> Result<BundleView, String> {
+    blocking(app, move |gui| {
+        let directory = folder(&directory)?;
+        bundle::verify(&directory, &gui.platform)
+            .map(|manifest| views::bundle(&manifest))
+            .map_err(|error| error.to_string())
+    })
+    .await?
+}
+
+/// Check a bundle, then plan installing its packages from its files.
+#[tauri::command]
+async fn prepare_bundle_install(
+    app: AppHandle,
+    directory: String,
+    trust: bool,
+) -> Result<PreparedView, String> {
+    blocking(app, move |gui| {
+        let catalog = gui.catalog.read().unwrap();
+        let planned = (|| {
+            let directory = folder(&directory)?;
+            let manifest =
+                bundle::verify(&directory, &gui.platform).map_err(|error| error.to_string())?;
+            bundle::plan_install(
+                &directory,
+                &manifest,
+                &[],
+                &gui.platform,
+                &doctor::Here,
+                trust,
+            )
+            .map_err(|error| error.to_string())
+        })();
+        match planned {
+            Ok(planned) => prepare_plan(gui, &catalog, planned),
+            Err(why) => cannot(gui, why),
+        }
+    })
+    .await
+}
+
 // Settings
 
 #[derive(Serialize)]
@@ -1255,7 +1385,8 @@ fn main() {
                 prepare_channels, prepare_update, list_backups, prepare_restore, drift_targets,
                 drift_check, save_baseline, reliability, trust, read_hardware, prepare_firmware,
                 prepare_smart, read_desktop, save_look, prepare_look, read_settings,
-                save_settings, save_theme, setup_start, setup_choose, setup_done $(, $extra)*
+                save_settings, save_theme, bundle_contents, prepare_bundle_create,
+                bundle_check, prepare_bundle_install, setup_start, setup_choose, setup_done $(, $extra)*
             ]
         };
     }
@@ -1293,6 +1424,19 @@ mod tests {
         );
         assert_eq!(catalog_dir(&args(&["gui"])), None);
         assert_eq!(catalog_dir(&args(&["gui", "--catalog-dir"])), None);
+    }
+
+    #[test]
+    fn a_folder_is_a_full_path_or_under_the_home_folder() {
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        assert_eq!(folder("~/bundle").unwrap(), home.join("bundle"));
+        assert_eq!(
+            folder(" /media/usb/b ").unwrap(),
+            PathBuf::from("/media/usb/b")
+        );
+        assert!(folder("bundle").is_err());
+        assert!(folder("-rf").is_err());
+        assert!(folder("").is_err());
     }
 
     #[test]
