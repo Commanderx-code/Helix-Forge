@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { modal } from '../lib/keys';
   import Changes from './Changes.svelte';
   import Icon from './Icon.svelte';
   import { toolbox } from '../lib/state.svelte';
@@ -33,7 +34,7 @@
 
 {#if prepared}
   <div class="backdrop" role="presentation">
-    <div class="dialog card" class:wide={showingChanges} role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="dialog card" class:wide={showingChanges} role="dialog" aria-modal="true" aria-labelledby="confirm-title" use:modal>
       <h2 id="confirm-title">{showingChanges ? 'What it changes' : TITLES[prepared.kind]}</h2>
       {#if prepared.kind === 'ready' && showingChanges}
         <Changes onback={() => (showingChanges = false)} />
@@ -62,7 +63,7 @@
           <button class="button ghost changes" onclick={() => (showingChanges = true)}>
             <Icon name="eye" size={14} /> What it changes
           </button>
-          <button class="button" onclick={() => toolbox.decline()}>Cancel</button>
+          <button class="button" data-autofocus onclick={() => toolbox.decline()}>Cancel</button>
           <button class="button primary" onclick={() => toolbox.confirm()}>
             <Icon name="play" size={14} /> Run
           </button>
@@ -77,7 +78,7 @@
           <p class="faint">Nothing was changed.</p>
         {/if}
         <div class="buttons">
-          <button class="button primary" onclick={() => toolbox.decline()}>OK</button>
+          <button class="button primary" data-autofocus onclick={() => toolbox.decline()}>OK</button>
         </div>
       {/if}
     </div>

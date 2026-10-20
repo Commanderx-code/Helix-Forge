@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { modal } from '../lib/keys';
   import Icon from './Icon.svelte';
   import Terminal from './Terminal.svelte';
   import * as api from '../lib/api';
@@ -113,16 +114,16 @@
 </script>
 
 <div class="backdrop">
-  <div class="window card" role="dialog" aria-modal="true" aria-labelledby="run-title">
+  <div class="window card" role="dialog" aria-modal="true" aria-labelledby="run-title" use:modal>
     <div class="top">
       <h2 id="run-title" class={finished ? (finished.succeeded ? 'good' : 'bad') : problem ? 'bad' : ''}>
         <Icon name="terminal" />
         {title}
       </h2>
-      <div class="progress" aria-label="Steps ended">
+      <div class="progress" role="progressbar" aria-label="Steps ended" aria-valuemin={0} aria-valuemax={total} aria-valuenow={ended}>
         <div class="bar" style:width="{total ? (ended / total) * 100 : 0}%"></div>
       </div>
-      <span class="faint count">{ended} of {total} steps</span>
+      <span class="faint count" aria-hidden="true">{ended} of {total} steps</span>
     </div>
 
     <div class="body">
@@ -146,7 +147,7 @@
     </div>
 
     {#if warnings.length > 0 || problem || finished}
-      <div class="messages">
+      <div class="messages" aria-live="polite">
         {#if problem}<div class="bad"><Icon name="warning" size={15} /> {problem}</div>{/if}
         {#each warnings as warning, index (index)}
           <div class="warning"><Icon name="warning" size={15} /> {warning}</div>

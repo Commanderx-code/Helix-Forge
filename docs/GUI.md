@@ -150,6 +150,26 @@ Two things work from every screen:
   <img src="https://raw.githubusercontent.com/Commanderx-code/Helix-toolbox/main/assets/screenshots/gui-hardware.png" width="820" alt="The window's Hardware screen: firmware, disks with their health check, and the temperature sensors">
 </p>
 
+## The keyboard
+
+Everything works without a mouse:
+
+| Keys | Does |
+| :--- | :--- |
+| `Ctrl K` | the command palette, from any screen |
+| `Tab`, `Shift Tab` | the sidebar, a screen's list, its details and buttons; each list is one stop |
+| `↑` `↓`, `Home` `End` | through the sidebar or a list; in a list the row reached is selected, as the terminal interface's cursor selects |
+| `Space` | on an entry, put it in the Install Plan or take it out, as in the terminal interface |
+| `Enter` | the focused button or row |
+| `Esc` | close a dialog; in the change preview, back to the confirmation |
+| `Ctrl Tab` | out of the run's terminal, where `Tab` is the program's |
+
+A dialog takes the focus when it opens (the confirmation starts on
+**Cancel**, so `Enter` never runs a plan by accident), keeps `Tab` inside
+it, and gives the focus back when it closes. Controls are labeled for
+screen readers, the run's progress and messages are announced as they
+change, and every text color has at least 4.5:1 contrast in both themes.
+
 ## How it is built
 
 ```text

@@ -20,6 +20,13 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   which go offline and what is downloaded, and checks a bundle and
   installs from it, each after confirmation, as `helix-toolbox bundle`
   does.
+- **The window without a mouse.** Arrow keys move through the sidebar
+  and every list, selecting as they go; Space queues an entry, as in the
+  terminal interface; each list is one Tab stop. Dialogs take the focus,
+  keep Tab inside and give it back, and the confirmation starts on
+  Cancel. Controls are labeled for screen readers, the run's progress is
+  announced, and the faint text is lighter (dark) or darker (light) for
+  4.5:1 contrast.
 - **The terminal interface keeps the window's settings.** Saving its
   Settings rewrote `settings.toml` with only its own, which would have
   dropped the window's theme; it now leaves the others as they are.

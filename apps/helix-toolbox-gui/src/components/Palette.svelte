@@ -2,6 +2,7 @@
   // The command palette (Ctrl-K): one searchable list of what the window
   // can do from anywhere, screens, actions and entries, best match first,
   // ranked as the terminal interface ranks them.
+  import { modal } from '../lib/keys';
   import Icon from './Icon.svelte';
   import * as api from '../lib/api';
   import { score } from '../lib/search';
@@ -164,7 +165,7 @@
     if (event.target === event.currentTarget) toolbox.palette = false;
   }}
 >
-  <div class="palette card" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette card" role="dialog" aria-modal="true" aria-label="Command palette" use:modal>
     <div class="field">
       <Icon name="search" size={18} />
       <input bind:this={input} bind:value={query} placeholder="Type a screen, an action or an entry…" onkeydown={onkey} />
@@ -266,6 +267,10 @@
   .detail {
     color: var(--faint);
     font-size: 12px;
+  }
+
+  .row.current .detail {
+    color: var(--muted);
   }
 
   .empty {

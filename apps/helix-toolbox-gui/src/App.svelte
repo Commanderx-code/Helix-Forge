@@ -74,7 +74,7 @@
     </main>
   </div>
   <footer>
-    <span>
+    <span role="status">
       {#if toolbox.checking}
         <span class="spin"><Icon name="refresh" size={13} /></span> Checking what is installed…
       {:else}
@@ -93,7 +93,7 @@
   <div class="toast" role="alert">
     <Icon name="warning" />
     <span>{toolbox.error}</span>
-    <button class="button ghost small" onclick={() => (toolbox.error = null)}><Icon name="x" size={14} /></button>
+    <button class="button ghost small" aria-label="Dismiss" onclick={() => (toolbox.error = null)}><Icon name="x" size={14} /></button>
   </div>
 {/if}
 
