@@ -146,13 +146,19 @@
     await click('Run now', details);
     const title = await until('the confirmation', () => document.querySelector('#confirm-title'));
     const dialog = title.closest('[role="dialog"]');
+    // The change preview first, then back to the same confirmation.
+    await click('What it changes', dialog);
+    await until('the step', () => withText('[role="dialog"] section h3', 'Marker'), 30000);
+    const changes = all('[role="dialog"] .change').length;
+    if (changes === 0) throw new Error('the change preview lists nothing for the marker');
+    await click('Back to the confirmation', dialog);
     const primary = await until('the confirm button', () => dialog.querySelector('.button.primary'));
     primary.click();
     const result = await until('the result', () => withText('.good, .bad', 'Result:'), 60000);
     if (!result.classList.contains('good')) throw new Error(result.textContent.trim());
     await click('Close');
     await until('the run panel to close', () => !document.querySelector('#run-title'));
-    return result.textContent.trim();
+    return `${changes} changes previewed; ${result.textContent.trim()}`;
   });
 
   await step('the plan is saved as a profile', async () => {

@@ -16,7 +16,7 @@ use helix_toolbox_engine::{
     hardware, history,
     inventory::{Inventory, which},
     overview::Overview,
-    plan, preflight, profiles,
+    plan, preflight, preview, profiles,
     reliability::{self, Evidence},
     settings::{self, RunChoices},
     setup, trust, updates,
@@ -31,7 +31,8 @@ use std::{
 };
 use tauri::{AppHandle, Manager, State, ipc::Channel};
 use views::{
-    AreaView, BackupView, ChannelView, DiagnosisView, PreparedView, RecordView, StatusView,
+    AreaView, BackupView, ChangesView, ChannelView, DiagnosisView, PreparedView, RecordView,
+    StatusView,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -236,6 +237,64 @@ async fn prepare(app: AppHandle, ids: Vec<String>) -> Result<PreparedView, Strin
         }
     })
     .await
+}
+
+/// The plan waiting for confirmation.
+fn waiting(gui: &Gui) -> Result<Plan, String> {
+    gui.pending
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "Nothing is waiting to run; review the plan again.".to_string())
+}
+
+/// What a plan is expected to change on this machine; it only reads.
+fn preview_changes(gui: &Gui, catalog: &Catalog, planned: &Plan) -> ChangesView {
+    let scripts = catalog.root().join("scripts");
+    let render = |arguments: &[String]| preview::render_with(&scripts, arguments);
+    let pinned = |name: &str| preview::pinned_source(&scripts, name);
+    let steps = preview::preview(
+        planned,
+        &|id| catalog.find(id),
+        &gui.platform,
+        &preview::Look {
+            system: &doctor::Here,
+            render: &render,
+            pinned: &pinned,
+        },
+    );
+    let download = preview::sources_for(planned)
+        .into_iter()
+        .any(|name| matches!(pinned(name), preview::Pinned::Missing { .. }));
+    views::changes(&steps, download)
+}
+
+/// The change preview of the plan waiting for confirmation.
+#[tauri::command]
+async fn changes(app: AppHandle) -> Result<ChangesView, String> {
+    blocking(app, |gui| {
+        let planned = waiting(gui)?;
+        let catalog = gui.catalog.read().unwrap();
+        Ok(preview_changes(gui, &catalog, &planned))
+    })
+    .await?
+}
+
+/// Download the pinned sources the waiting plan reads, which changes
+/// nothing else, then preview its changes again.
+#[tauri::command]
+async fn download_sources(app: AppHandle) -> Result<ChangesView, String> {
+    blocking(app, |gui| {
+        let planned = waiting(gui)?;
+        let catalog = gui.catalog.read().unwrap();
+        let scripts = catalog.root().join("scripts");
+        for name in preview::sources_for(&planned) {
+            preview::fetch_source(&scripts, name)
+                .map_err(|why| format!("{name} could not be downloaded: {why}"))?;
+        }
+        Ok(preview_changes(gui, &catalog, &planned))
+    })
+    .await?
 }
 
 /// Forget a plan the user did not confirm.
@@ -1166,7 +1225,8 @@ fn main() {
     macro_rules! commands {
         ($($extra:ident),*) => {
             tauri::generate_handler![
-                about, areas, statuses, favorites, pin, prepare, cancel, run, write, resize,
+                about, areas, statuses, favorites, pin, prepare, changes, download_sources, cancel,
+                run, write, resize,
                 stop, close_run, runs, save_profile, doctor, prepare_repair, updates,
                 prepare_channels, prepare_update, list_backups, prepare_restore, drift_targets,
                 drift_check, save_baseline, reliability, trust, read_hardware, prepare_firmware,

@@ -52,6 +52,11 @@ The items:
     replaces a copy the user keeps outside any package tool, and the
     window's AppImage.
 
+## v1.12.0: the window catches up
+
+- [x] The change preview in the window's confirmation, with files side by
+      side and the pinned source downloaded on request
+
 ## v1.10.0: staying up to date (done)
 
 - [x] An Arch package of the window (`packaging/nfpm-gui.yaml`,

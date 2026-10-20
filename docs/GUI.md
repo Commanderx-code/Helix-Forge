@@ -67,6 +67,14 @@ decides whether a snapshot is taken first), and each step with the command
 it runs. A plan the checks block opens "Cannot run yet" instead, and
 nothing is changed.
 
+**What it changes**, in the confirmation, is the terminal interface's
+change preview: each step's expected changes to files, packages and
+services, marked ✓ known, ~ expected or ? not known in advance, and a
+file now and afterward **side by side** where the new contents can be
+worked out without writing anything. When a dotfiles entry reads a pinned
+source that is not downloaded yet, **Download the source** fetches it
+(and changes nothing else) so its files can be compared too.
+
 The run opens in its own panel: the steps on the left, the terminal on the
 right. The terminal is a real one, the same pseudo-terminal the terminal
 interface uses: type into it when a step asks something, including the

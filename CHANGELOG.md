@@ -4,6 +4,14 @@ Each release is tagged `vMAJOR.MINOR.PATCH` on GitHub, with the program, its
 packages and their checksums. A release whose workflow only adopted updated
 dotfiles or Myfish sources raises the patch number and is not listed here.
 
+## v1.12.0
+
+- **What a plan changes, in the window.** The confirmation's **What it
+  changes** shows the terminal interface's change preview: each step's
+  expected changes, marked known, expected or not known in advance, and a
+  file now and afterward side by side. A pinned dotfiles source can be
+  downloaded from there to compare the files it writes.
+
 ## v1.11.3
 
 - **One logo everywhere.** The flat HT tile, `assets/icon.svg`, is the

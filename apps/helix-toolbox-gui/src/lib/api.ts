@@ -7,6 +7,7 @@ import type {
   About,
   AreaView,
   BackupsView,
+  ChangesView,
   DesktopView,
   Diagnosis,
   DriftView,
@@ -39,6 +40,8 @@ export const statuses = () => call<Record<string, StatusView>>('statuses');
 export const favorites = () => call<string[]>('favorites');
 export const pin = (id: string, pinned: boolean) => call<string[]>('pin', { id, pinned });
 export const prepare = (ids: string[]) => call<Prepared>('prepare', { ids });
+export const changes = () => call<ChangesView>('changes');
+export const downloadSources = () => call<ChangesView>('download_sources');
 export const cancel = () => call<void>('cancel');
 export const write = (data: string) => call<void>('write', { data });
 export const resize = (rows: number, cols: number) => call<void>('resize', { rows, cols });
