@@ -45,6 +45,8 @@
   // the window as it is now fails the step.
   async function accessible(where) {
     if (!window.axe) return;
+    // The window makes scrolling regions reachable within 300 ms.
+    await sleep(500);
     const { violations } = await window.axe.run(document, { resultTypes: ['violations'] });
     if (violations.length > 0) {
       const first = violations[0];

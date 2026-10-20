@@ -222,7 +222,7 @@ export async function call(command: string, args: Record<string, unknown> = {}):
       return {
         online: args.online,
         channels: [
-          { id: 'pacman', name: 'Arch packages', count: 58, summary: '58 updates', pending: [{ name: 'linux-zen', from: '7.2.9', to: '7.2.10' }], note: '', command_line: 'sudo pacman -Syu', caveat: null },
+          { id: 'pacman', name: 'Arch packages', count: 58, summary: '58 updates', pending: ['linux-zen', 'mesa', 'firefox', 'kwin', 'plasma-workspace', 'systemd', 'glibc', 'python', 'qt6-base', 'pipewire', 'nvidia-utils', 'libinput', 'curl', 'git'].map((name, index) => ({ name, from: `1.${index}.0`, to: `1.${index}.1` })), note: '', command_line: 'sudo pacman -Syu', caveat: null },
           { id: 'flatpak', name: 'Flatpak (system)', count: 2, summary: '2 updates', pending: [], note: '', command_line: 'flatpak update -y', caveat: null },
           { id: 'helixforge', name: 'Helix Toolbox', count: 0, summary: 'up to date', pending: [], note: '1.8.0; it fetches the latest release each time it starts', command_line: '', caveat: null },
         ],
