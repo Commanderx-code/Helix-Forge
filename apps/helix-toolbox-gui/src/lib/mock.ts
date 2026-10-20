@@ -1,7 +1,7 @@
 // Sample answers for working on the interface in a browser, where there is
 // no Tauri side. Nothing here reads or changes the machine.
 
-import type { AreaView, EntryView, ItemView, Prepared, RecordView, RunEvent, StatusView } from './types';
+import type { AreaView, ChangesView, EntryView, ItemView, Prepared, RecordView, RunEvent, StatusView } from './types';
 
 const entry = (id: string, name: string, description: string, flags = 'I', extra: Partial<EntryView> = {}): ItemView => ({
   type: 'entry',
@@ -162,6 +162,46 @@ export async function call(command: string, args: Record<string, unknown> = {}):
             entry.kind === 'package'
               ? `sudo pacman -S --needed ${entry.id}`
               : `/bin/sh -e ${entry.id}.sh  (in scripts/installers)`,
+        })),
+      };
+      return result;
+    }
+    case 'changes':
+    case 'download_sources': {
+      const downloaded = command === 'download_sources';
+      const result: ChangesView = {
+        download: !downloaded,
+        steps: planned.map((entry) => ({
+          name: entry.name,
+          changes:
+            entry.kind === 'package'
+              ? [
+                  { certainty: 'known', text: `installs ${entry.id} 15.2.0-1 from extra (pacman's own answer)`, diff: null },
+                  { certainty: 'expected', text: 'takes effect at once', diff: null },
+                ]
+              : [
+                  {
+                    certainty: downloaded ? 'known' : 'unknown',
+                    text: downloaded
+                      ? 'replaces ~/.config/fish/config.fish'
+                      : 'writes files from the pinned dotfiles source, which is not downloaded yet',
+                    diff: downloaded
+                      ? {
+                          path: '~/.config/fish/config.fish',
+                          changed: true,
+                          rows: [
+                            { before: 'set -g fish_greeting', after: 'set -g fish_greeting', tag: 'same' },
+                            { before: 'set -gx EDITOR nano', after: 'set -gx EDITOR nvim', tag: 'changed' },
+                            { before: null, after: 'starship init fish | source', tag: 'added' },
+                            { before: 'alias ls="ls --color"', after: 'alias ls="ls --color"', tag: 'same' },
+                            null,
+                            { before: 'fish_add_path ~/bin', after: null, tag: 'removed' },
+                          ],
+                        }
+                      : null,
+                  },
+                  { certainty: 'expected', text: 'may restart a unit it chooses (seen in its script)', diff: null },
+                ],
         })),
       };
       return result;

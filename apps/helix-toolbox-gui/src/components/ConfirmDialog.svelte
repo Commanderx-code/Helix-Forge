@@ -1,8 +1,15 @@
 <script lang="ts">
+  import Changes from './Changes.svelte';
   import Icon from './Icon.svelte';
   import { toolbox } from '../lib/state.svelte';
 
   const prepared = $derived(toolbox.confirming?.prepared);
+  /** Whether the change preview is shown instead of the steps. */
+  let showingChanges = $state(false);
+
+  $effect(() => {
+    if (!prepared) showingChanges = false;
+  });
 
   const TITLES = {
     nothing: 'Nothing to run',
@@ -18,15 +25,19 @@
 <svelte:window
   onkeydown={(event) => {
     if (!prepared) return;
-    if (event.key === 'Escape') toolbox.decline();
+    if (event.key !== 'Escape') return;
+    if (showingChanges) showingChanges = false;
+    else toolbox.decline();
   }}
 />
 
 {#if prepared}
   <div class="backdrop" role="presentation">
-    <div class="dialog card" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-      <h2 id="confirm-title">{TITLES[prepared.kind]}</h2>
-      {#if prepared.kind === 'ready'}
+    <div class="dialog card" class:wide={showingChanges} role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <h2 id="confirm-title">{showingChanges ? 'What it changes' : TITLES[prepared.kind]}</h2>
+      {#if prepared.kind === 'ready' && showingChanges}
+        <Changes onback={() => (showingChanges = false)} />
+      {:else if prepared.kind === 'ready'}
         <ul class="header">
           {#each prepared.header as line, index (index)}
             <li class={tone(line)}>
@@ -48,6 +59,9 @@
           {/each}
         </ol>
         <div class="buttons">
+          <button class="button ghost changes" onclick={() => (showingChanges = true)}>
+            <Icon name="eye" size={14} /> What it changes
+          </button>
           <button class="button" onclick={() => toolbox.decline()}>Cancel</button>
           <button class="button primary" onclick={() => toolbox.confirm()}>
             <Icon name="play" size={14} /> Run
@@ -88,6 +102,11 @@
     padding: 22px 24px;
     border-color: var(--selected-line);
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  }
+
+  .dialog.wide {
+    width: min(1100px, calc(100vw - 80px));
+    height: calc(100vh - 80px);
   }
 
   h2 {
@@ -194,5 +213,10 @@
     justify-content: flex-end;
     gap: 8px;
     margin-top: 18px;
+  }
+
+  .buttons .changes {
+    margin-right: auto;
+    color: var(--cyan);
   }
 </style>
