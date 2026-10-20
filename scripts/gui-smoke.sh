@@ -1,9 +1,9 @@
 #!/bin/sh -e
 
 # Drive a debug build of the window through the setup wizard, the command
-# palette, every screen, a run with its change preview and a saved
-# profile, against the fixture catalog, and check what the drive script
-# reports.
+# palette, the theme, every screen, a run with its change preview and a
+# saved profile, against the fixture catalog, and check what the drive
+# script reports.
 # usage: scripts/gui-smoke.sh BINARY
 # BINARY is a debug build with the frontend in it (cargo build --features
 # tauri/custom-protocol in apps/helix-toolbox-gui/src-tauri, after npm run
@@ -46,7 +46,8 @@ if ! grep -qx 'drive: DONE' "$work/stderr"; then
     exit 1
 fi
 # What the steps left behind: the marker the run wrote, the profile the
-# plan was saved as, and the mark that the wizard was offered.
+# plan was saved as, the mark that the wizard was offered and the theme
+# chosen last.
 if ! grep -q '^marker from ' "$work/marker.txt" 2>/dev/null; then
     echo "the run did not write the marker file" >&2
     exit 1
@@ -57,6 +58,10 @@ if ! ls "$work/config/helix-toolbox/profiles/"*.toml >/dev/null 2>&1; then
 fi
 if ! grep -qx 'set_up = true' "$work/config/helix-toolbox/settings.toml" 2>/dev/null; then
     echo "the wizard was not remembered as offered" >&2
+    exit 1
+fi
+if ! grep -qx 'window_theme = "system"' "$work/config/helix-toolbox/settings.toml"; then
+    echo "the theme was not saved" >&2
     exit 1
 fi
 echo "the window's smoke test passed"

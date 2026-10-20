@@ -22,6 +22,7 @@ import type {
   StatusView,
   TargetView,
   UpdatesView,
+  WindowTheme,
 } from './types';
 
 const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -82,6 +83,7 @@ export const setupDone = () => call<void>('setup_done');
 export const settings = () => call<SettingsView>('read_settings');
 export const saveSettings = (keepGoing: boolean, snapshots: boolean) =>
   call<SettingsView>('save_settings', { keepGoing, snapshots });
+export const saveTheme = (theme: WindowTheme) => call<SettingsView>('save_theme', { theme });
 
 /** Run the confirmed plan; `onEvent` gets each event as it comes. */
 export async function run(rows: number, cols: number, onEvent: (event: RunEvent) => void) {

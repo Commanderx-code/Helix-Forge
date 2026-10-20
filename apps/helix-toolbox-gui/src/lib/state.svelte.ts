@@ -3,6 +3,7 @@
 // lives in RunPanel.
 
 import * as api from './api';
+import { applyTheme } from './theme';
 import type { About, AreaView, EntryView, ItemView, Prepared, StatusView } from './types';
 
 export type Screen =
@@ -82,6 +83,7 @@ class Toolbox {
     try {
       const [about, areas, favorites] = await Promise.all([api.about(), api.areas(), api.favorites()]);
       this.about = about;
+      applyTheme(about.theme);
       this.areas = areas;
       this.favorites = favorites;
       if (about.first_run) this.wizard = true;

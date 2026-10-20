@@ -11,6 +11,13 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   expected changes, marked known, expected or not known in advance, and a
   file now and afterward side by side. A pinned dotfiles source can be
   downloaded from there to compare the files it writes.
+- **A light theme for the window.** The window follows the desktop's
+  light or dark color scheme, and changes with it; Settings can keep it
+  dark or light instead. The run's terminal stays dark, as programs
+  expect.
+- **The terminal interface keeps the window's settings.** Saving its
+  Settings rewrote `settings.toml` with only its own, which would have
+  dropped the window's theme; it now leaves the others as they are.
 
 ## v1.11.3
 

@@ -1,7 +1,7 @@
 // Sample answers for working on the interface in a browser, where there is
 // no Tauri side. Nothing here reads or changes the machine.
 
-import type { AreaView, ChangesView, EntryView, ItemView, Prepared, RecordView, RunEvent, StatusView } from './types';
+import type { AreaView, ChangesView, EntryView, ItemView, Prepared, RecordView, RunEvent, StatusView, WindowTheme } from './types';
 
 const entry = (id: string, name: string, description: string, flags = 'I', extra: Partial<EntryView> = {}): ItemView => ({
   type: 'entry',
@@ -110,6 +110,7 @@ function find(id: string, items: ItemView[] = AREAS.flatMap((area) => area.items
 }
 
 let planned: EntryView[] = [];
+let theme: WindowTheme = 'system';
 
 export async function call(command: string, args: Record<string, unknown> = {}): Promise<unknown> {
   await new Promise((resolve) => setTimeout(resolve, 60));
@@ -119,6 +120,7 @@ export async function call(command: string, args: Record<string, unknown> = {}):
         version: '1.11.0',
         command_line: true,
         first_run: false,
+        theme,
         overview: {
           rows: [
             ['Distribution', 'Sample Linux'],
@@ -268,9 +270,12 @@ export async function call(command: string, args: Record<string, unknown> = {}):
       ];
     case 'setup_done':
       return undefined;
+    case 'save_theme':
+      theme = args.theme as WindowTheme;
+      return call('read_settings');
     case 'read_settings':
     case 'save_settings':
-      return { keep_going: args.keepGoing ?? false, snapshots: args.snapshots ?? true, snapshot_tool: 'Snapper', path: '/home/me/.config/helix-toolbox/settings.toml' };
+      return { keep_going: args.keepGoing ?? false, snapshots: args.snapshots ?? true, snapshot_tool: 'Snapper', path: '/home/me/.config/helix-toolbox/settings.toml', theme };
     default:
       return undefined;
   }

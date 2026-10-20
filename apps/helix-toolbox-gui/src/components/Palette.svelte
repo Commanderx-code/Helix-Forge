@@ -191,7 +191,7 @@
     justify-content: center;
     align-items: flex-start;
     padding-top: 12vh;
-    background: rgba(5, 8, 14, 0.6);
+    background: var(--backdrop);
     z-index: 40;
   }
 
@@ -203,7 +203,7 @@
     padding: 0;
     overflow: hidden;
     border-color: var(--selected-line);
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 24px 60px var(--shadow);
   }
 
   .field {

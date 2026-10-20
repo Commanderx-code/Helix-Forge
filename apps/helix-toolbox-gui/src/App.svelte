@@ -176,7 +176,7 @@
     border: 1px solid var(--red);
     background: var(--panel);
     color: var(--red);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 12px 30px var(--shadow);
     z-index: 30;
   }
 

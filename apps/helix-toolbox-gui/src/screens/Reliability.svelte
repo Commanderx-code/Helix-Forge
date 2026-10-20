@@ -154,7 +154,7 @@
     margin-left: 8px;
     padding: 0 6px;
     border-radius: 4px;
-    background: rgba(255, 120, 140, 0.15);
+    background: color-mix(in srgb, var(--red) 15%, transparent);
     color: var(--red);
     font-size: 11px;
     font-weight: 700;

@@ -168,7 +168,7 @@
     inset: 0;
     display: grid;
     place-items: center;
-    background: rgba(5, 8, 14, 0.7);
+    background: var(--backdrop);
     z-index: 40;
   }
 
@@ -179,7 +179,7 @@
     max-height: calc(100vh - 80px);
     padding: 22px 24px;
     border-color: var(--selected-line);
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 24px 60px var(--shadow);
   }
 
   .top {

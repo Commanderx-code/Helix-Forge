@@ -96,6 +96,18 @@
     await until('the wizard to close', () => !document.querySelector('[role="dialog"][data-page]'));
   });
 
+  await step('a theme from Settings applies at once and is saved', async () => {
+    const background = () => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+    const before = background();
+    (await until('the Light choice', () => document.querySelector('input[name="theme"][value="light"]'))).click();
+    await until('the light theme', () => document.documentElement.dataset.theme === 'light');
+    const light = background();
+    if (light !== '#f3f5fa') throw new Error(`the light background is ${light}`);
+    document.querySelector('input[name="theme"][value="system"]').click();
+    await until('the desktop\'s theme', () => !document.documentElement.dataset.theme);
+    return `${before} → ${light} → ${background()}`;
+  });
+
   await step('Ctrl-K opens the palette, which finds an entry', async () => {
     // Whatever an earlier step left open closes first.
     key(window, 'Escape');

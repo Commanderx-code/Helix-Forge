@@ -186,7 +186,7 @@
     inset: 0;
     display: grid;
     place-items: center;
-    background: rgba(5, 8, 14, 0.75);
+    background: var(--backdrop);
     z-index: 20;
   }
 
@@ -197,7 +197,7 @@
     height: calc(100vh - 64px);
     padding: 18px 20px;
     border-color: var(--selected-line);
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 24px 60px var(--shadow);
   }
 
   .top {
@@ -312,7 +312,7 @@
     overflow: hidden;
     border: 1px solid var(--line);
     border-radius: var(--radius-small);
-    background: var(--bg);
+    background: #0d111a;
   }
 
   .messages {

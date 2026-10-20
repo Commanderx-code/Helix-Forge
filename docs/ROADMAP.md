@@ -56,6 +56,8 @@ The items:
 
 - [x] The change preview in the window's confirmation, with files side by
       side and the pinned source downloaded on request
+- [x] A light theme that follows the desktop's color scheme, or is chosen
+      in Settings (`window_theme` in `settings.toml`)
 
 ## v1.10.0: staying up to date (done)
 
