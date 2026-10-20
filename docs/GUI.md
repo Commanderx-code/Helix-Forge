@@ -114,6 +114,10 @@ The other tools, under **More tools** in the sidebar:
 - **Settings**: what happens after a failed step and whether a snapshot
   is taken first, the same `settings.toml` the terminal interface keeps
   its own look in, and **Set up this machine…**, the setup wizard again.
+  **Appearance** chooses the window's theme: **Follow the desktop** (the
+  default: light or dark as the desktop's color scheme is, through GTK,
+  and changing with it), **Dark** or **Light**. It applies at once and is
+  kept as `window_theme`; the run's terminal stays dark in either.
   The Install Plan's **Save as profile** adds a profile to the Profiles
   area; a profile's details have **Put its entries in the plan**, to queue
   its entries one by one and change the plan before it runs.

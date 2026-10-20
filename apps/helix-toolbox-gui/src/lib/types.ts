@@ -9,7 +9,11 @@ export type About = {
   command_line: boolean;
   /** The first start on this machine: the setup wizard opens by itself. */
   first_run: boolean;
+  theme: WindowTheme;
 };
+
+/** The window's colors: the desktop's preference, or always dark or light. */
+export type WindowTheme = 'system' | 'dark' | 'light';
 
 // The setup wizard
 
@@ -239,4 +243,5 @@ export type SettingsView = {
   snapshots: boolean;
   snapshot_tool: string | null;
   path: string | null;
+  theme: WindowTheme;
 };

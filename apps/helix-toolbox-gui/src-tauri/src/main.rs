@@ -18,7 +18,7 @@ use helix_toolbox_engine::{
     overview::Overview,
     plan, preflight, preview, profiles,
     reliability::{self, Evidence},
-    settings::{self, RunChoices},
+    settings::{self, RunChoices, WindowTheme},
     setup, trust, updates,
 };
 use helix_toolbox_platform::LinuxInfo;
@@ -117,6 +117,7 @@ struct About {
     command_line: bool,
     /// The first start on this machine: the setup wizard opens by itself.
     first_run: bool,
+    theme: WindowTheme,
 }
 
 #[tauri::command]
@@ -129,7 +130,16 @@ fn about(gui: State<Gui>) -> About {
             .settings
             .as_deref()
             .is_some_and(|path| !settings::set_up(path)),
+        theme: theme(&gui),
     }
+}
+
+/// The window's theme, as saved.
+fn theme(gui: &Gui) -> WindowTheme {
+    gui.settings
+        .as_deref()
+        .map(settings::window_theme)
+        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -1111,6 +1121,7 @@ struct SettingsView {
     snapshot_tool: Option<&'static str>,
     /// Where the settings are kept.
     path: Option<String>,
+    theme: WindowTheme,
 }
 
 #[tauri::command]
@@ -1125,6 +1136,7 @@ fn read_settings(gui: State<Gui>) -> SettingsView {
         snapshots: choices.snapshots,
         snapshot_tool: backups::Snapshots::here().map(backups::Snapshots::label),
         path: gui.settings.as_ref().map(|path| path.display().to_string()),
+        theme: theme(&gui),
     }
 }
 
@@ -1147,6 +1159,18 @@ fn save_settings(
         },
     )
     .map_err(|error| format!("the settings could not be saved: {error}"))?;
+    Ok(read_settings(gui))
+}
+
+/// Save the window's theme, leaving every other setting as it is.
+#[tauri::command]
+fn save_theme(gui: State<Gui>, theme: WindowTheme) -> Result<SettingsView, String> {
+    let path = gui
+        .settings
+        .as_deref()
+        .ok_or("cannot find the configuration folder")?;
+    settings::save_window_theme(path, theme)
+        .map_err(|error| format!("the theme could not be saved: {error}"))?;
     Ok(read_settings(gui))
 }
 
@@ -1231,7 +1255,7 @@ fn main() {
                 prepare_channels, prepare_update, list_backups, prepare_restore, drift_targets,
                 drift_check, save_baseline, reliability, trust, read_hardware, prepare_firmware,
                 prepare_smart, read_desktop, save_look, prepare_look, read_settings,
-                save_settings, setup_start, setup_choose, setup_done $(, $extra)*
+                save_settings, save_theme, setup_start, setup_choose, setup_done $(, $extra)*
             ]
         };
     }
