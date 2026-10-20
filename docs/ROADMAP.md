@@ -61,6 +61,9 @@ The items:
 - [x] Offline bundles in the window: the Install Plan's entries bundled
       through `helix-toolbox bundle create` in the run's terminal, and a
       bundle checked and installed
+- [x] The window by keyboard and screen reader: arrow keys through lists,
+      Space to queue, focus kept in dialogs, labeled controls and 4.5:1
+      contrast, which axe-core checks on every screen in the smoke test
 
 ## v1.10.0: staying up to date (done)
 

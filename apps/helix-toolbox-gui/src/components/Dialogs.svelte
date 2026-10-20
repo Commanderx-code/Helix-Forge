@@ -1,6 +1,7 @@
 <script lang="ts">
   // The notice (something to read) and the prompt (a name or a word to
   // type) that every screen uses, from the shared state.
+  import { modal } from '../lib/keys';
   import Icon from './Icon.svelte';
   import { toolbox } from '../lib/state.svelte';
 
@@ -33,7 +34,7 @@
 
 {#if toolbox.notice}
   <div class="backdrop" role="presentation">
-    <div class="dialog card" role="dialog" aria-modal="true" aria-labelledby="notice-title">
+    <div class="dialog card" role="dialog" aria-modal="true" aria-labelledby="notice-title" use:modal>
       <h2 id="notice-title">{toolbox.notice.title}</h2>
       <pre class:mono={toolbox.notice.mono}>{toolbox.notice.text}</pre>
       <div class="buttons">
@@ -45,7 +46,7 @@
 
 {#if toolbox.prompt}
   <div class="backdrop" role="presentation">
-    <div class="dialog card narrow" role="dialog" aria-modal="true" aria-labelledby="prompt-title">
+    <div class="dialog card narrow" role="dialog" aria-modal="true" aria-labelledby="prompt-title" use:modal>
       <h2 id="prompt-title">{toolbox.prompt.title}</h2>
       <p>{toolbox.prompt.text}</p>
       <input

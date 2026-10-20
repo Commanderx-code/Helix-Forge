@@ -42,7 +42,7 @@
 </div>
 
 {#if error}
-  <p class="error"><Icon name="warning" size={15} /><span>{error}</span></p>
+  <p class="error" role="alert"><Icon name="warning" size={15} /><span>{error}</span></p>
 {/if}
 
 <div class="body">

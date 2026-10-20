@@ -72,7 +72,7 @@
     {:else if view === null}
       <p class="empty-note">Reading the settings…</p>
     {:else}
-      <h3>Runs</h3>
+      <h2 class="section">Runs</h2>
       <label class="toggle">
         <input type="checkbox" bind:checked={keepGoing} />
         <span>
@@ -94,7 +94,7 @@
         </span>
       </label>
 
-      <h3>Appearance</h3>
+      <h2 class="section">Appearance</h2>
       <div class="themes" role="radiogroup" aria-label="Theme">
         {#each THEMES as choice (choice.theme)}
           <label class="toggle">
@@ -114,7 +114,7 @@
       </div>
       <p class="faint">The run's terminal stays dark in either theme, as programs expect.</p>
 
-      <h3>Elsewhere</h3>
+      <h2 class="section">Elsewhere</h2>
       <p class="muted">
         The terminal interface keeps its own theme and icons, under its Settings screen. Favorites and the history are shared with it.
       </p>

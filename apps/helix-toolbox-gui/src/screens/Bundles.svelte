@@ -124,7 +124,7 @@
       </div>
 
       {#if makeProblem}
-        <p class="said bad"><Icon name="warning" size={15} /> {makeProblem}</p>
+        <p class="said bad" role="alert"><Icon name="warning" size={15} /> {makeProblem}</p>
       {:else if contents}
         <ul class="entries">
           {#each contents.entries as entry, index (index)}
@@ -139,7 +139,7 @@
           {/each}
         </ul>
         {#if offline === 0}
-          <p class="said bad">None of these entries can be bundled; they all need the network.</p>
+          <p class="said bad" role="alert">None of these entries can be bundled; they all need the network.</p>
         {:else}
           {#each downloads(contents) as line, index (index)}<p class="muted">{line}</p>{/each}
         {/if}
@@ -183,9 +183,9 @@
       </div>
 
       {#if installProblem}
-        <p class="said bad"><Icon name="warning" size={15} /> {installProblem}</p>
+        <p class="said bad" role="alert"><Icon name="warning" size={15} /> {installProblem}</p>
       {:else if bundle}
-        <p class="said good"><Icon name="check" size={15} /> Every one of its {bundle.files} files matches its checksum.</p>
+        <p class="said good" role="status"><Icon name="check" size={15} /> Every one of its {bundle.files} files matches its checksum.</p>
         <dl class="kv">
           <dt>Made for</dt>
           <dd>{bundle.distribution} {bundle.architecture}</dd>

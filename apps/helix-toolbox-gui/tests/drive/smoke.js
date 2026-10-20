@@ -40,6 +40,22 @@
     target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }));
   const screenTitle = () => document.querySelector('.screen-title')?.textContent.trim() ?? '';
 
+  // axe-core, which scripts/gui-smoke.sh puts in front of this script when
+  // npm has installed it: what it finds wrong (labels, roles, contrast) on
+  // the window as it is now fails the step.
+  async function accessible(where) {
+    if (!window.axe) return;
+    // The window makes scrolling regions reachable within 300 ms.
+    await sleep(500);
+    const { violations } = await window.axe.run(document, { resultTypes: ['violations'] });
+    if (violations.length > 0) {
+      const first = violations[0];
+      throw new Error(
+        `${where}: ${violations.map((found) => found.id).join(', ')}; ${first.help} at ${first.nodes[0]?.target.join(' ')}`,
+      );
+    }
+  }
+
   async function step(name, work) {
     try {
       const detail = await work();
@@ -101,10 +117,16 @@
     const before = background();
     (await until('the Light choice', () => document.querySelector('input[name="theme"][value="light"]'))).click();
     await until('the light theme', () => document.documentElement.dataset.theme === 'light');
+    await accessible('Settings in the light theme');
     const light = background();
     if (light !== '#f3f5fa') throw new Error(`the light background is ${light}`);
     document.querySelector('input[name="theme"][value="system"]').click();
     await until('the desktop\'s theme', () => !document.documentElement.dataset.theme);
+    document.querySelector('input[name="theme"][value="dark"]').click();
+    await until('the dark theme', () => document.documentElement.dataset.theme === 'dark');
+    await accessible('Settings in the dark theme');
+    document.querySelector('input[name="theme"][value="system"]').click();
+    await until('the desktop\'s theme again', () => !document.documentElement.dataset.theme);
     return `${before} → ${light} → ${background()}`;
   });
 
@@ -138,13 +160,49 @@
     key(window, 'Escape');
   });
 
-  const screens = ['Updates', 'Backups', 'Drift', 'Reliability', 'Hardware', 'Desktop', 'History', 'Favorites', 'Dashboard'];
+  await step('the keyboard moves through a list, queues with Space and keeps the focus in dialogs', async () => {
+    await click('Tools', document.querySelector('nav'));
+    await until('the Tools screen', () => screenTitle().startsWith('Tools'));
+    const marker = await until('Marker', () => all('.list .select').find((node) => node.textContent.includes('Marker')));
+    marker.focus();
+    key(marker, 'ArrowDown');
+    const next = document.activeElement;
+    if (next === marker || !next.matches('.select, .group')) throw new Error('ArrowDown did not move on');
+    if (next.matches('.select')) {
+      const name = next.querySelector('.name').textContent.trim();
+      await until(`${name} selected`, () => withText('aside h2', name));
+    }
+    key(next, 'ArrowUp');
+    if (document.activeElement !== marker) throw new Error('ArrowUp did not come back');
+    await until('Marker selected', () => withText('aside h2', 'Marker'));
+    const queued = () => withText('nav .item', 'Install Plan')?.querySelector('.count')?.textContent.trim() ?? '0';
+    const before = queued();
+    key(marker, ' ');
+    await until('Marker queued', () => queued() !== before);
+    key(marker, ' ');
+    await until('Marker taken out', () => queued() === before);
+    // The palette takes the focus, keeps Tab inside and gives it back.
+    key(window, 'k', { ctrlKey: true });
+    const input = await until('the palette', () => document.querySelector('[aria-label="Command palette"] input'));
+    await until('the focus in the palette', () => document.activeElement === input);
+    await accessible('the palette');
+    const controls = all('[aria-label="Command palette"] button, [aria-label="Command palette"] input');
+    controls[controls.length - 1].focus();
+    key(document.activeElement, 'Tab');
+    if (document.activeElement !== controls[0]) throw new Error('Tab left the palette');
+    key(input, 'Escape');
+    await until('the palette to close', () => !document.querySelector('[aria-label="Command palette"]'));
+    await until('the focus back on Marker', () => document.activeElement === marker);
+  });
+
+  const screens = ['Updates','Backups', 'Drift', 'Reliability', 'Hardware', 'Desktop', 'History', 'Favorites', 'Dashboard'];
   for (const name of screens) {
     await step(`the ${name} screen opens`, async () => {
       await click(name, document.querySelector('nav'));
       await until(`the ${name} screen`, () => screenTitle().startsWith(name));
       // What it reads has arrived, or it said what went wrong.
       await until('the screen settled', () => !withText('.empty-note', '…') && !withText('.empty-note', 'Reading'), 30000);
+      await accessible(name);
       return screenTitle();
     });
   }
@@ -158,16 +216,21 @@
     await click('Run now', details);
     const title = await until('the confirmation', () => document.querySelector('#confirm-title'));
     const dialog = title.closest('[role="dialog"]');
+    // The focus starts on Cancel, so Enter never runs a plan by accident.
+    await until('the focus on Cancel', () => document.activeElement?.textContent.trim() === 'Cancel');
+    await accessible('the confirmation');
     // The change preview first, then back to the same confirmation.
     await click('What it changes', dialog);
     await until('the step', () => withText('[role="dialog"] section h3', 'Marker'), 30000);
     const changes = all('[role="dialog"] .change').length;
+    await accessible('the change preview');
     if (changes === 0) throw new Error('the change preview lists nothing for the marker');
     await click('Back to the confirmation', dialog);
     const primary = await until('the confirm button', () => dialog.querySelector('.button.primary'));
     primary.click();
     const result = await until('the result', () => withText('.good, .bad', 'Result:'), 60000);
     if (!result.classList.contains('good')) throw new Error(result.textContent.trim());
+    await accessible('the finished run');
     await click('Close');
     await until('the run panel to close', () => !document.querySelector('#run-title'));
     return `${changes} changes previewed; ${result.textContent.trim()}`;
@@ -201,10 +264,12 @@
     await type(all('.field input')[1], '/nonexistent/helix-toolbox-bundle');
     await click('Check it');
     const said = await until('the check', () => all('.part')[1].querySelector('.said.bad'), 30000);
+    await accessible('Offline bundles');
     if (!said.textContent.includes('/nonexistent')) throw new Error(said.textContent.trim());
     return `Marker: ${state}; a missing folder: ${said.textContent.trim()}`;
   });
 
+  await trace(window.axe ? `axe-core ${window.axe.version} checked the screens` : 'axe-core was not loaded; nothing was checked for accessibility');
   await trace(failed ? 'DONE with failures' : 'DONE');
   await sleep(300);
   await invoke('quit');
