@@ -14,7 +14,7 @@ out=assets/icons
 window=apps/helix-toolbox-gui/src-tauri/icons
 
 render() {
-    rsvg-convert --width "$1" --height "$1" "$logo" | magick - -strip "$2"
+    rsvg-convert --width "$1" --height "$1" "$logo" | magick - -strip "PNG32:$2"
 }
 
 render 512 assets/icon.png
