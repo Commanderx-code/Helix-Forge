@@ -191,6 +191,20 @@
     return text.split(' is saved')[0] + ' is saved';
   });
 
+  await step('the Offline bundles screen reads the plan and checks a folder', async () => {
+    await click('Offline bundles', document.querySelector('nav'));
+    await until('the bundles screen', () => screenTitle() === 'Offline bundles');
+    await click('Check what it needs');
+    const marker = await until('the contents', () => withText('.entries li', 'Marker'), 60000);
+    const state = marker.querySelector('.pill').textContent.trim();
+    if (state !== 'Needs the network') throw new Error(`the marker script is "${state}"`);
+    await type(all('.field input')[1], '/nonexistent/helix-toolbox-bundle');
+    await click('Check it');
+    const said = await until('the check', () => all('.part')[1].querySelector('.said.bad'), 30000);
+    if (!said.textContent.includes('/nonexistent')) throw new Error(said.textContent.trim());
+    return `Marker: ${state}; a missing folder: ${said.textContent.trim()}`;
+  });
+
   await trace(failed ? 'DONE with failures' : 'DONE');
   await sleep(300);
   await invoke('quit');

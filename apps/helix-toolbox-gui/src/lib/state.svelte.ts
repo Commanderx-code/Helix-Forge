@@ -18,6 +18,7 @@ export type Screen =
   | { kind: 'drift' }
   | { kind: 'reliability' }
   | { kind: 'hardware' }
+  | { kind: 'bundles' }
   | { kind: 'desktop' }
   | { kind: 'settings' };
 

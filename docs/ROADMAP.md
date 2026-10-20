@@ -58,6 +58,9 @@ The items:
       side and the pinned source downloaded on request
 - [x] A light theme that follows the desktop's color scheme, or is chosen
       in Settings (`window_theme` in `settings.toml`)
+- [x] Offline bundles in the window: the Install Plan's entries bundled
+      through `helix-toolbox bundle create` in the run's terminal, and a
+      bundle checked and installed
 
 ## v1.10.0: staying up to date (done)
 

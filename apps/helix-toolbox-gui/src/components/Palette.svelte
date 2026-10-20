@@ -42,6 +42,7 @@
     { screen: { kind: 'drift' }, label: 'Drift' },
     { screen: { kind: 'reliability' }, label: 'Reliability' },
     { screen: { kind: 'hardware' }, label: 'Hardware' },
+    { screen: { kind: 'bundles' }, label: 'Offline bundles' },
     { screen: { kind: 'desktop' }, label: 'Desktop' },
     { screen: { kind: 'settings' }, label: 'Settings' },
   ]);

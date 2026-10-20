@@ -6,6 +6,7 @@ use helix_toolbox_catalog::Catalog;
 use helix_toolbox_core::{Action, Entry, Item};
 use helix_toolbox_engine::{
     backups::Backup,
+    bundle::{BundledEntry, Contents, Manifest},
     confirmation::{Line, Prepared},
     doctor::{Diagnosis, Health},
     execution::ExecutionEvent,
@@ -239,6 +240,100 @@ fn change(change: &Change) -> ChangeView {
                 })
                 .collect(),
         }),
+    }
+}
+
+/// What a bundle of some entries would hold, before anything is
+/// downloaded.
+#[derive(Debug, Serialize)]
+pub struct BundleContentsView {
+    pub entries: Vec<BundledEntryView>,
+    /// Package files to download, not counting their signatures.
+    pub files: usize,
+    /// What dnf or zypper downloads itself, with the dependencies.
+    pub dnf: Vec<String>,
+    pub zypper: Vec<String>,
+    /// Flatpaks copied from this machine's installation.
+    pub flatpaks: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BundledEntryView {
+    pub name: String,
+    pub offline: bool,
+    /// Why it needs the network, if it does.
+    pub network: Option<String>,
+    pub flatpak: Option<String>,
+}
+
+/// A bundle on this machine that matched its checksums. Its text comes
+/// from the bundle, so it is made printable.
+#[derive(Debug, Serialize)]
+pub struct BundleView {
+    pub distribution: String,
+    pub architecture: String,
+    /// The Helix Toolbox it was made with, and whether a release build.
+    pub version: String,
+    pub release: bool,
+    pub created: String,
+    pub complete: bool,
+    pub files: usize,
+    pub bytes: u64,
+    pub flatpaks: Vec<String>,
+    pub entries: Vec<BundledEntryView>,
+}
+
+fn bundled(entry: &BundledEntry) -> BundledEntryView {
+    BundledEntryView {
+        name: helix_toolbox_core::printable(&entry.name),
+        offline: entry.offline,
+        network: entry.network.as_deref().map(helix_toolbox_core::printable),
+        flatpak: entry.flatpak.as_deref().map(helix_toolbox_core::printable),
+    }
+}
+
+pub fn bundle_contents(contents: &Contents) -> BundleContentsView {
+    BundleContentsView {
+        entries: contents.entries.iter().map(bundled).collect(),
+        files: contents
+            .downloads
+            .iter()
+            .filter(|download| !download.file.ends_with(".sig"))
+            .count(),
+        dnf: contents.dnf.clone(),
+        zypper: contents.zypper.clone(),
+        flatpaks: contents
+            .flatpaks
+            .iter()
+            .map(|flatpak| helix_toolbox_core::printable(&flatpak.reference))
+            .collect(),
+    }
+}
+
+pub fn bundle(manifest: &Manifest) -> BundleView {
+    let printable = helix_toolbox_core::printable;
+    BundleView {
+        distribution: printable(&manifest.distribution),
+        architecture: printable(&manifest.architecture),
+        version: printable(&manifest.helixforge),
+        release: manifest.release,
+        created: helix_toolbox_engine::date(manifest.created),
+        complete: manifest.complete,
+        files: manifest.files.len(),
+        bytes: manifest.files.iter().map(|file| file.bytes).sum(),
+        flatpaks: manifest
+            .flatpaks
+            .iter()
+            .map(|flatpak| {
+                format!(
+                    "{} at commit {}, from {}",
+                    printable(&flatpak.reference),
+                    printable(flatpak.commit.get(..12).unwrap_or(&flatpak.commit)),
+                    printable(&flatpak.remote)
+                )
+            })
+            .collect(),
+        entries: manifest.entries.iter().map(bundled).collect(),
     }
 }
 
