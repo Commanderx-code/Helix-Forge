@@ -4,6 +4,19 @@ Each release is tagged `vMAJOR.MINOR.PATCH` on GitHub, with the program, its
 packages and their checksums. A release whose workflow only adopted updated
 dotfiles or Myfish sources raises the patch number and is not listed here.
 
+## v1.16.0
+
+- **A script that exits 0 is not enough.** After a run, a script entry is
+  checked for what it installs and for what it was to set up: the theme a
+  GRUB or SDDM setting selects is installed, a service is enabled and
+  running, a word is on the kernel command line. The GRUB, Limine, boot
+  splash, SDDM, AppArmor, SELinux and SSD TRIM entries declare these checks
+  (`[[verify]]` in the catalog); what only holds after a reboot is checked
+  after it, in Helix Doctor. What cannot be read as you is said to be not
+  checked, never passed. `c` in the terminal interface, **Check it now**
+  in the window and `helix-toolbox verify <entry>` check an entry at any
+  time. The VM tests run the same checks after each of their cases.
+
 ## v1.15.0
 
 - **The terminal interface catches up with the window.** It has an

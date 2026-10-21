@@ -81,14 +81,19 @@ and press `Enter`.
 7. The run asks `[Y]` first, then shows its output in a window inside the
    menu. Type into it when an installer asks a question. `Ctrl-C` stops it;
    `l` saves the log.
-8. Afterward Helix Toolbox checks each package with the package manager and
-   says what it verified. Anything that did not finish stays in the Install
-   Plan to run again.
+8. Afterward Helix Toolbox checks each package with the package manager,
+   and for a script what it installs and what it was to set up (the theme
+   a setting selects is installed, a service is running, a word is on the
+   kernel command line), and says what it verified. What only shows after a
+   reboot is checked after it, in Helix Doctor. Anything that did not
+   finish stays in the Install Plan to run again.
 
 `i` in a list cycles between all entries, installed ones and ones with an
 update. `*` pins an entry to **Favorites**. `r` removes an installed package
 entry that offers removal; `u` updates the selected entry and `U` every entry
-with an update.
+with an update. `c` checks an entry now, without changing anything: whether
+it is still as it left the machine (**Check it now** in the window,
+`helix-toolbox verify <entry>` on the command line).
 
 ## Profiles
 

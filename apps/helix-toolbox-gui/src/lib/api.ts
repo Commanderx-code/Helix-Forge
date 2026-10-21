@@ -81,6 +81,7 @@ export const saveBaseline = (name: string) => call<string>('save_baseline', { na
 
 export const reliability = () => call<ReliabilityView>('reliability');
 export const trust = (id: string) => call<string>('trust', { id });
+export const checkEntry = (id: string) => call<string>('check_entry', { id });
 
 export const hardware = () => call<Hardware>('read_hardware');
 export const prepareFirmware = (index: number) => call<Prepared>('prepare_firmware', { index });

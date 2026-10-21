@@ -55,7 +55,9 @@ others: `sha256sum --check --ignore-missing SHA256SUMS` and
   terminal interface. A package entry that offers removal and is
   installed has **Remove…** too, the terminal interface's `r`: the package
   manager or Flatpak that installed it removes it, after the same
-  confirmation.
+  confirmation. **Check it now** makes the entry's checks, read-only, as
+  `c` does in the terminal interface: whether what it installs and sets up
+  is still there.
 - **Favorites**: the pinned entries, the same `favorites.toml` the
   terminal interface keeps.
 - **Install Plan**: the queue, in the order it will be planned; entries can
@@ -225,6 +227,7 @@ Its commands:
 | `runs` | the history |
 | `save_profile` | the Install Plan as a profile |
 | `bug_report`, `copy_text` | `helix-toolbox report` with the window's facts, and text put on the clipboard |
+| `check_entry` | `helix-toolbox verify` for one entry, as text: **Check it now** in an entry's details |
 | `hardware_report`, `open_issue` | `helix-toolbox report --worked` for a run or an entry, and its issue opened by `xdg-open`, outside the AppImage's own libraries |
 | `import_profile`, `export_profile`, `delete_profile` | your profiles: one added from a file, written to one, or deleted; the file is chosen in the file chooser unless a path is given |
 | `doctor`, `prepare_repair` | the health checks, and a repair ready to confirm |

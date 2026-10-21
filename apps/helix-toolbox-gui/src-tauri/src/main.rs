@@ -20,7 +20,7 @@ use helix_toolbox_engine::{
     plan, plan_removal, preflight, preview, profiles,
     reliability::{self, Evidence},
     settings::{self, RunChoices, WindowTheme},
-    setup, trust, updates,
+    setup, trust, updates, verification,
 };
 use helix_toolbox_platform::LinuxInfo;
 use serde::Serialize;
@@ -1174,6 +1174,45 @@ async fn trust(app: AppHandle, id: String) -> Result<String, String> {
     .await?
 }
 
+/// Check an entry now, read-only, as `helix-toolbox verify` does: what it
+/// installs and its checks of files, settings and services.
+#[tauri::command]
+async fn check_entry(app: AppHandle, id: String) -> Result<String, String> {
+    blocking(app, move |gui| {
+        let catalog = gui.catalog.read().unwrap();
+        let entry = catalog
+            .find(&id)
+            .ok_or_else(|| format!("There is no entry {id} in the catalog."))?;
+        let records = history::read(1000).unwrap_or_default();
+        let rebooted = verification::rebooted_since(&doctor::Here, &records, &entry.id);
+        let checks = verification::check_entry(
+            entry,
+            &gui.platform,
+            rebooted,
+            &helix_toolbox_engine::Probe::holds,
+            &helix_toolbox_platform::binary_exists,
+            &doctor::Here,
+        );
+        if checks.is_empty() {
+            return Ok(format!(
+                "{} declares no checks and installs nothing Helix Toolbox can find, so there is nothing to check.",
+                entry.name
+            ));
+        }
+        let failed = checks.iter().filter(|check| !check.passed).count();
+        let mut text = match failed {
+            0 => "Everything that can be checked here is as it should be.\n\n".to_string(),
+            1 => "One check found it not as it should be.\n\n".to_string(),
+            count => format!("{count} checks found it not as it should be.\n\n"),
+        };
+        for check in &checks {
+            text.push_str(&format!("{}: {}\n  {}\n", check.label(), check.name, check.detail));
+        }
+        Ok(text)
+    })
+    .await?
+}
+
 // Hardware
 
 /// Firmware, disks, sensors, batteries and devices, read from this machine.
@@ -1759,7 +1798,7 @@ fn main() {
                 stop, close_run, runs, save_profile, import_profile, export_profile,
                 delete_profile, bug_report, copy_text, hardware_report, open_issue, doctor,
                 prepare_repair, updates,
-                prepare_channels, prepare_update, prepare_remove, list_backups, prepare_restore, drift_targets,
+                prepare_channels, prepare_update, prepare_remove, list_backups, prepare_restore, drift_targets, check_entry,
                 drift_check, save_baseline, reliability, trust, read_hardware, prepare_firmware,
                 prepare_smart, read_desktop, save_look, prepare_look, read_settings,
                 save_settings, save_notifications, save_theme, bundle_contents, prepare_bundle_create,

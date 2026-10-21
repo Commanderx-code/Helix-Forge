@@ -95,7 +95,7 @@ export type Finished = {
   succeeded: boolean;
   verified: boolean;
   steps: (StepInfo & StepState)[];
-  checks: { name: string; passed: boolean; detail: string }[];
+  checks: { name: string; passed: boolean; detail: string; unsure: boolean; later: boolean }[];
 };
 
 /** An event of a run: ExecutionEvent's JSON form, output as base64. */
