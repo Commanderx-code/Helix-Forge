@@ -52,6 +52,12 @@ The items:
     replaces a copy the user keeps outside any package tool, and the
     window's AppImage.
 
+## v1.14.0: told when updates wait
+
+- [x] A desktop notification when updates are waiting, from a systemd user
+      timer, turned on and off in either Settings or with
+      `helix-toolbox notifications`
+
 ## v1.13.0: the window does the rest
 
 - [x] Remove a package entry from the window, as the terminal interface's

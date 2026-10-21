@@ -14,7 +14,7 @@ package installs happen only in the Distributions workflow's containers.
 | Screen tests | `apps/helix-toolbox/src/tui/` | the interface drawn into a test backend: keys, screens, popups, the small-terminal warning |
 | Engine end to end | `apps/helix-toolbox/tests/end_to_end.rs` | fixture plans run through the mock runner and a real shell |
 | Program in a terminal | `apps/helix-toolbox/tests/terminal.rs` | the built `helix-toolbox` driven through a pseudo-terminal, below |
-| The window | `apps/helix-toolbox-gui`, `scripts/gui-smoke.sh` | the frontend type-checked and built, the crate's tests of the shapes the window reads, and the smoke test: a debug build opened on a virtual display and driven through the setup wizard, the command palette, the theme, the keyboard, every screen, a run with its change preview, a saved profile exported, deleted and imported again, the offline bundles screen, the removal of a package entry and a bug report against the fixture catalog, with axe-core checking each screen and dialog for labels, roles and contrast ([GUI.md](GUI.md)) |
+| The window | `apps/helix-toolbox-gui`, `scripts/gui-smoke.sh` | the frontend type-checked and built, the crate's tests of the shapes the window reads, and the smoke test: a debug build opened on a virtual display and driven through the setup wizard, the command palette, the theme, the keyboard, every screen, a run with its change preview, a saved profile exported, deleted and imported again, the offline bundles screen, the removal of a package entry, a bug report and the update notifications turned on and off against the fixture catalog, with axe-core checking each screen and dialog for labels, roles and contrast ([GUI.md](GUI.md)) |
 | Installer tests | `tests/installers/` | the Commander installers against stand-in commands and temporary homes |
 | Shellcheck | `scripts/verify.sh` | every shared helper and installer, with errors gated for the general catalog |
 | Workflow lint | `scripts/verify.sh` | actionlint over every workflow, including the shell in each step |
@@ -137,7 +137,7 @@ its published checksum:
 | Machine | What it is |
 |---|---|
 | `arch`, `debian`, `fedora` | the distribution's cloud image on BIOS firmware, with a USB stick plugged into the Arch one |
-| `opensuse` | the openSUSE Tumbleweed cloud image on BIOS firmware, for offline bundles |
+| `opensuse` | the openSUSE Tumbleweed cloud image on BIOS firmware, for offline bundles and the update notifications' timer under the user's own systemd |
 | `arch-bundle` | the Arch cloud image on BIOS firmware, for the Flatpak offline bundle, whose runtimes take a long time to download |
 | `arch-themes`, `arch-ctt-themes` | the Arch cloud image on BIOS firmware, for the GRUB themes, split in two so they run at once, with Garuda's repository added for its theme |
 | `arch-uefi` | the Arch cloud image on UEFI firmware (OVMF) |
