@@ -1128,8 +1128,9 @@ CASES = {
 }
 
 
-# Cases that are not catalog entries, so have nothing for verify to check.
-NOT_ENTRIES = {'bundle-flatpak', 'bundle-zypper', 'update-notifications'}
+# Cases with nothing for verify to check afterward: not catalog entries,
+# or an installation whose live system is gone once it finishes.
+NOT_ENTRIES = {'bundle-flatpak', 'bundle-zypper', 'update-notifications', 'arch-server-setup'}
 
 
 def verify(machine, entry):
