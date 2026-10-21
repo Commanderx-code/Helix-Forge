@@ -242,6 +242,14 @@ enum Command {
         #[arg(long)]
         yes: bool,
     },
+    /// Check that entries left the machine as they should, read-only: what
+    /// each installs and its checks of files, settings and services. Checks
+    /// that hold only after a reboot are made once the machine has started
+    /// since the entry last ran. Exits 1 when one fails.
+    Verify {
+        #[arg(required = true)]
+        ids: Vec<String>,
+    },
     /// How far each entry has been tested: in distribution containers, with
     /// stand-in commands, on virtual or real machines, or not yet; and its
     /// last successful run on this machine.
@@ -937,6 +945,7 @@ fn main() -> Result<()> {
             print!("{}", hardware_text(&found));
             Ok(())
         }
+        Command::Verify { ids } => inspect::verify(&load(false)?, &platform, &ids, as_json),
         Command::Reliability { ids, critical } => {
             inspect::reliability(&load(false)?, &ids, critical, as_json)
         }
@@ -1172,16 +1181,7 @@ fn confirm_and_run(
     let this = std::env::current_exe().context("cannot find the Helix Toolbox executable")?;
     let finished = execute(planned, &catalog.lib_dir(), &this, &mut InheritedRunner)?;
     for check in &finished.checks {
-        println!(
-            "{} {}: {}",
-            if check.passed {
-                "Verified:"
-            } else {
-                "Not verified:"
-            },
-            check.name,
-            check.detail
-        );
+        println!("{}: {}: {}", check.label(), check.name, check.detail);
     }
     let unfinished = finished.unfinished();
     if !unfinished.is_empty() {

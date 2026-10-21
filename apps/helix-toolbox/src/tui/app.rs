@@ -83,7 +83,7 @@ Areas (Applications and the other catalog screens)
   Enter / l         open a group or run an entry o / x / Del  Profiles: import, export, delete
   h                 parent group, or the sidebar Space       add to or remove from the install plan
   d                 description                  p           preview the script or command
-  r                 remove an installed package  v           where it comes from (trust)
+  r / c             remove a package / check it  v           where it comes from (trust)
   u                 update the entry             U           update every entry with an update
   g                 flags guide     *   pin a favorite     i   show all, installed or updates
 
@@ -2360,6 +2360,7 @@ impl App {
                             list.push(Hint::new(&["d"], "Describe"));
                             list.push(Hint::new(&["p"], "Preview"));
                             list.push(Hint::new(&["v"], "Trust"));
+                            list.push(Hint::new(&["c"], "Check"));
                             if own_profile(entry) {
                                 list.push(Hint::new(&["x"], "Export"));
                                 list.push(Hint::new(&["Del"], "Delete"));
@@ -2866,6 +2867,7 @@ impl App {
                     }
                 }
                 KeyCode::Char(' ') => self.toggle_queue(),
+                KeyCode::Char('c') => self.check_selected(),
                 KeyCode::Char('o') if self.in_profiles() => {
                     self.popup = Some(Popup::Ask(
                         InputPopup::new(
@@ -5599,6 +5601,56 @@ impl App {
         }
     }
 
+    // ----- Checks -----
+
+    /// Check the selected entry now, read-only: what it installs and its
+    /// checks of files, settings and services.
+    fn check_selected(&mut self) {
+        let Some(entry) = self.selected_entry().cloned() else {
+            return;
+        };
+        let rebooted = helix_toolbox_engine::verification::rebooted_since(
+            &doctor::Here,
+            &self.run_history(),
+            &entry.id,
+        );
+        let checks = helix_toolbox_engine::verification::check_entry(
+            &entry,
+            &self.platform,
+            rebooted,
+            &helix_toolbox_engine::Probe::holds,
+            &helix_toolbox_platform::binary_exists,
+            &doctor::Here,
+        );
+        let text = if checks.is_empty() {
+            format!(
+                "{} declares no checks and installs nothing Helix Toolbox can find, so there is nothing to check.",
+                entry.name
+            )
+        } else {
+            let failed = checks.iter().filter(|check| !check.passed).count();
+            let mut text = match failed {
+                0 => "Everything that can be checked here is as it should be.\n\n".to_string(),
+                1 => "One check found it not as it should be.\n\n".to_string(),
+                count => format!("{count} checks found it not as it should be.\n\n"),
+            };
+            for check in &checks {
+                text.push_str(&format!(
+                    "{}: {}\n  {}\n",
+                    check.label(),
+                    check.name,
+                    check.detail
+                ));
+            }
+            text
+        };
+        self.popup = Some(Popup::Text(TextPopup::new(
+            format!("Checks: {}", entry.name),
+            text,
+            true,
+        )));
+    }
+
     // ----- Hardware reports -----
 
     /// A report that a run worked on this machine, to read, then send as an
@@ -7461,6 +7513,47 @@ mod tests {
             panic!("no hardware report");
         };
         assert!(url.contains("entry%20%3D%20%22meld%22") && !url.contains("%22git%22"));
+    }
+
+    #[test]
+    fn c_checks_an_entry_now_and_says_when_there_is_nothing_to_check() {
+        let mut app = app();
+        let area = area_of(&app, "git");
+        app.open_screen(Screen::Area(area));
+        app.focus = Focus::Main;
+        app.search = "git".chars().collect();
+        app.update_rows();
+        let row = app
+            .rows
+            .iter()
+            .position(|row| matches!(row, Row::Entry(entry) if entry.id == "git"))
+            .unwrap();
+        app.main_state.select(Some(row));
+        assert!(screen(&mut app, 140, 40).contains("c Check"));
+        press(&mut app, KeyCode::Char('c'));
+        let shown = screen(&mut app, 140, 40);
+        assert!(shown.contains("Checks: Git"), "{shown}");
+        assert!(
+            shown.contains("verified: Git") || shown.contains("Verified: Git"),
+            "a package entry is checked for its package: {shown}"
+        );
+        press(&mut app, KeyCode::Esc);
+        // An entry that installs nothing it can find and declares no checks.
+        let nothing = app
+            .catalog
+            .entries()
+            .into_iter()
+            .find(|entry| {
+                matches!(entry.action, Action::Script { .. })
+                    && entry.detect.is_none()
+                    && entry.effects.checks.is_empty()
+            })
+            .unwrap()
+            .clone();
+        app.rows = vec![Row::Entry(Box::new(nothing))];
+        app.main_state.select(Some(0));
+        press(&mut app, KeyCode::Char('c'));
+        assert!(screen(&mut app, 140, 40).contains("nothing to check"));
     }
 
     #[test]

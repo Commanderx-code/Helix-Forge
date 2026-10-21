@@ -1128,6 +1128,24 @@ CASES = {
 }
 
 
+# Cases that are not catalog entries, so have nothing for verify to check.
+NOT_ENTRIES = {'bundle-flatpak', 'bundle-zypper', 'update-notifications'}
+
+
+def verify(machine, entry):
+    """What the entry's own checks say, after its case passed: its catalog
+    [[verify]] claims and what it installs, read on the machine as the user,
+    the after-reboot ones too where the case rebooted. A check the case
+    proves but the catalog gets wrong fails here."""
+    if entry in NOT_ENTRIES:
+        return
+    said = machine.ssh(f'./helix-toolbox verify {shlex.quote(entry)}', check=False)
+    for line in said.stdout.splitlines():
+        log(f'{entry}: {line.strip()}')
+    if said.returncode != 0:
+        raise RuntimeError(f'helix-toolbox verify {entry} found it not as it should be:\n{said.stdout[-2000:]}{said.stderr[-1000:]}')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('--distro', choices=sorted(MACHINES), required=True, help='the machine')
@@ -1153,6 +1171,7 @@ def main():
             started = time.time()
             try:
                 case(machine, options.shots)
+                verify(machine, entry)
                 entries[entry] = 'verified'
                 log(f'{entry}: verified in {time.time() - started:.0f} s')
             except Exception as error:  # every case is reported, then the run fails

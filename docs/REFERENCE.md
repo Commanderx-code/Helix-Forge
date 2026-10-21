@@ -70,6 +70,20 @@ is a partial upgrade, which Arch does not support. Afterward each package's
 version is compared with its version before; one that did not change is not
 verified. Entries managed by Nix say to update them there.
 
+After every run, each package step is checked with the package manager, and
+each script entry for what its `[detect]` table says it installs and for its
+`[[verify]]` checks (docs/CATALOG.md): the files and folders it leaves,
+words on the kernel command line, the value of a setting and whether it
+names something installed, and systemd units enabled or running. They are
+read as you and change nothing. The result says `verified`, or `not
+verified:` with what is wrong; what cannot be read here (a file only root
+can read, a container without systemd) is reported as not checked, never as
+passed. Checks that hold only after a reboot are kept beside the history and
+made once the machine has started again: Helix Doctor's **Checks after the
+reboot** shows them waiting, then what they found. `c` on an entry, **Check
+it now** in the window and `helix-toolbox verify <entry>…` (exit status 1
+when one fails, `--json` too) make an entry's checks at any time.
+
 **Updates** shows the whole machine, not only catalog entries: for each tool
 that keeps it (pacman or apt, dnf, zypper; the AUR helper; Flatpak's system
 and user installations; Home Manager with a flake, NixOS, a Nix profile) what
@@ -461,6 +475,7 @@ helix-toolbox docgen docs/walkthrough.md # the catalog as Markdown
 helix-toolbox status --json              # any reading command, or a --dry-run plan, as JSON
 helix-toolbox report                     # what a bug report needs, to paste into an issue
 helix-toolbox report --worked sddm       # that an entry worked here, for its Hardware Tested record
+helix-toolbox verify sddm grub-dracula   # whether entries left the machine as they should, read-only
 ```
 
 `--json` prints one JSON document for other programs instead of text; it

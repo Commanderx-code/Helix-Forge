@@ -331,6 +331,21 @@
     return text.split('\n').find((line) => line.startsWith('- WebKitGTK')) ?? 'gathered and copied';
   });
 
+  await step('an entry is checked now, without changing anything', async () => {
+    key(window, 'k', { ctrlKey: true });
+    const input = await until('the palette', () => document.querySelector('[aria-label="Command palette"] input'));
+    await type(input, 'marker');
+    key(input, 'Enter');
+    const details = await until('the details', () => withText('aside h2', 'Marker')?.closest('aside'));
+    await click('Check it now', details);
+    const told = await until('the checks', () => withText('#notice-title', 'Checks: Marker')?.closest('[role="dialog"]'));
+    const text = told.querySelector('pre')?.textContent ?? '';
+    if (!text.includes('nothing to check') && !text.includes('as it should be')) throw new Error(text);
+    await accessible('the checks');
+    await click('OK', told);
+    return text.split('\n')[0];
+  });
+
   await step('a run that worked becomes a hardware report, and its issue opens', async () => {
     await click('History', document.querySelector('nav'));
     await until('History', () => screenTitle().startsWith('History'));

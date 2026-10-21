@@ -257,6 +257,8 @@ export async function call(command: string, args: Record<string, unknown> = {}):
       ].join('\n');
     case 'delete_profile':
       return `${find(args.id as string)?.name} is deleted.`;
+    case 'check_entry':
+      return `Everything that can be checked here is as it should be.\n\nVerified: ${find(args.id as string)?.name}: pacman lists it`;
     case 'hardware_report':
       return {
         text: [
@@ -437,6 +439,6 @@ export async function run(onEvent: (event: RunEvent) => void) {
     succeeded: true,
     verified: true,
     steps: steps.map((step) => ({ ...step, state: 'done' as const })),
-    checks: steps.map((step) => ({ name: step.name, passed: true, detail: `pacman lists ${step.id}` })),
+    checks: steps.map((step) => ({ name: step.name, passed: true, detail: `pacman lists ${step.id}`, unsure: false, later: false })),
   });
 }
