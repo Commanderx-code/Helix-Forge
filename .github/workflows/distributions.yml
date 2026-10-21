@@ -628,8 +628,8 @@ jobs:
   # whose firmware says it is a Steam Deck. The Arch and openSUSE machines
   # also install offline bundles with no network.
   # The screens captured while they boot are kept for a person to look at.
-  # The window on each distribution: its AppImage opened on its own, then
-  # its package installed with the command line's by the distribution's
+  # The window on each distribution: its AppImage opened without WebKitGTK
+  # installed, then its package installed with the command line's by the distribution's
   # package tool, which finds WebKitGTK and the rest, opened on a virtual
   # display and removed.
   window:
@@ -689,11 +689,24 @@ jobs:
         with:
           name: window-${{ matrix.arch || 'x86_64' }}
           path: window
-      - name: The AppImage opens with nothing else installed
+      - name: The AppImage opens where WebKitGTK is not installed
         env:
           # No FUSE in a container: the AppImage unpacks itself instead.
           APPIMAGE_EXTRACT_AND_RUN: 1
         run: |
+          # What a desktop has whatever runs on it, and what AppImages
+          # therefore leave out (fontconfig, X11, OpenGL): GTK 3 and Mesa.
+          # Not WebKitGTK, which the AppImage brings.
+          case "${{ matrix.family }}" in
+            Arch) pacman -S --noconfirm --needed gtk3 mesa ;;
+            Debian) DEBIAN_FRONTEND=noninteractive apt-get install -y libgtk-3-0 libgl1 libegl1 libgbm1 ;;
+            Fedora) dnf install -y gtk3 mesa-libGL mesa-libEGL mesa-libgbm ;;
+            openSUSE) zypper --non-interactive install libgtk-3-0 Mesa-libGL1 Mesa-libEGL1 libgbm1 ;;
+          esac
+          if ldconfig -p | grep -q 'libwebkit2gtk-4\.1\.so'; then
+            echo "WebKitGTK is installed, so this would not show the AppImage brings it" >&2
+            exit 1
+          fi
           ls -l window
           case "${{ matrix.arch }}" in
             aarch64) appimage=$(echo window/helix-toolbox-gui_*_aarch64.AppImage) ;;
@@ -702,6 +715,8 @@ jobs:
           chmod +x "$appimage"
           xvfb-run -a scripts/window-opens.sh "$appimage"
       - name: The window's package installs with the command line's, opens and removes cleanly
+        # Whatever the AppImage did.
+        if: ${{ !cancelled() }}
         run: |
           case "${{ matrix.arch }}" in
             aarch64) arch=aarch64 debian=arm64 ;;
