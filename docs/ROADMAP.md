@@ -56,6 +56,8 @@ The items:
 
 - [x] Remove a package entry from the window, as the terminal interface's
       `r` does
+- [x] Export, import and delete your profiles from the window, through the
+      desktop's file chooser
 
 ## v1.12.0: the window catches up
 

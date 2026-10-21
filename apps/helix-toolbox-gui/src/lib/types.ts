@@ -40,6 +40,8 @@ export type EntryView = {
   interactive: boolean;
   /** A package entry that offers removal. */
   removable: boolean;
+  /** One of the user's own profiles, which can be exported and deleted. */
+  yours: boolean;
   runs: string[];
 };
 

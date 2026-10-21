@@ -11,6 +11,10 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   interface and `helix-toolbox remove`: removed by the package manager or
   Flatpak that installed it, after the same confirmation and change
   preview.
+- **Your profiles, shared from the window.** A profile of your own has
+  **Export…**, to write it to a file, and **Delete…**; **Import a
+  profile…** in the Profiles area adds one from a file, checked against
+  the catalog. The files are chosen in the desktop's own file chooser.
 
 ## v1.12.0
 

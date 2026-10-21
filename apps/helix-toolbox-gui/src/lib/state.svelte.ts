@@ -235,6 +235,16 @@ class Toolbox {
     }
   }
 
+  /** Your profiles changed: the areas again, and a deleted one out of the
+   * plan and the details. */
+  async profilesChanged(deleted?: string) {
+    if (deleted) {
+      this.queue = this.queue.filter((id) => id !== deleted);
+      if (this.selected === deleted) this.selected = null;
+    }
+    await this.reloadAreas();
+  }
+
   /** Entries matching the search, across every area. */
   matches(text: string): Placed[] {
     const words = text.toLowerCase().split(/\s+/).filter(Boolean);

@@ -13,6 +13,7 @@ use helix_toolbox_engine::{
     history::Record,
     inventory::Status,
     preview::{Certainty, Change, StepPreview, Tag},
+    profiles,
     updates::Channel,
 };
 use serde::Serialize;
@@ -52,6 +53,8 @@ pub struct EntryView {
     pub interactive: bool,
     /// A package entry that offers removal.
     pub removable: bool,
+    /// One of the user's own profiles, which can be exported and deleted.
+    pub yours: bool,
     /// The entries a profile runs, in order.
     pub runs: Vec<String>,
 }
@@ -63,19 +66,27 @@ pub fn areas(catalog: &Catalog) -> Vec<AreaView> {
         .map(|tab| AreaView {
             id: tab.id.clone(),
             name: tab.name.clone(),
-            items: tab.items.iter().map(item).collect(),
+            items: tab.items.iter().map(|found| item(found, false)).collect(),
         })
         .collect()
 }
 
-fn item(item: &Item) -> ItemView {
+/// `yours`: inside the user's profiles' group.
+fn item(item: &Item, yours: bool) -> ItemView {
     match item {
-        Item::Entry(entry) => ItemView::Entry(entry_view(entry)),
+        Item::Entry(entry) => ItemView::Entry(EntryView {
+            yours,
+            ..entry_view(entry)
+        }),
         Item::Group(group) => ItemView::Group {
             id: group.id.clone(),
             name: group.name.clone(),
             description: group.description.clone(),
-            items: group.items.iter().map(self::item).collect(),
+            items: group
+                .items
+                .iter()
+                .map(|found| self::item(found, group.id == profiles::GROUP))
+                .collect(),
         },
     }
 }
@@ -104,6 +115,7 @@ pub fn entry_view(entry: &Entry) -> EntryView {
                 ..
             }
         ),
+        yours: false,
         runs,
     }
 }
