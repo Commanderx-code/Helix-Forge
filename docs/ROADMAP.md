@@ -60,7 +60,7 @@ The items:
       by Helix Doctor; `helix-toolbox verify`, `c` and **Check it now**
 - [x] Scheduled, read-only health and Drift checks on the notifications
       timer, telling you what changed
-- [ ] Release integrity: SBOMs, dependency audits, a reproducibility check
+- [x] Release integrity: SBOMs, dependency audits, a reproducibility check
       and tests that the JSON and older settings files still read
 
 ## v1.15.0: both interfaces alike

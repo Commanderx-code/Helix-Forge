@@ -24,6 +24,14 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   `helix-toolbox notifications health on` and `notifications drift
   <baseline>`. A click opens the window on Helix Doctor or Drift. Nothing
   is repaired or put back by itself.
+- **What a release is made of.** Each release carries CycloneDX software
+  bills of materials for the program, the window and the window's
+  frontend, checksummed and attested with the programs. Every change and
+  every week, the dependencies are checked for known vulnerabilities and
+  licenses, the window's packages audited, and the release binary built
+  twice to show it comes out the same. Tests check what 1.x promises: the
+  `--json` shapes only gain fields, and settings, history, profiles,
+  baselines and looks written by 1.0, 1.1 and 1.4 still read.
 
 ## v1.15.0
 
