@@ -58,6 +58,7 @@ The items:
       `r` does
 - [x] Export, import and delete your profiles from the window, through the
       desktop's file chooser
+- [x] A bug report from the window, copied to paste into an issue
 
 ## v1.12.0: the window catches up
 

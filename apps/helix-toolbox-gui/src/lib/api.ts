@@ -57,6 +57,9 @@ export const importProfile = () => call<string | null>('import_profile', { path:
 /** Export one of the user's profiles to a file the file chooser names; null when it was closed. */
 export const exportProfile = (id: string) => call<string | null>('export_profile', { id, path: null });
 export const deleteProfile = (id: string) => call<string>('delete_profile', { id });
+/** `helix-toolbox report` and the window's own facts, as Markdown. */
+export const bugReport = () => call<string>('bug_report');
+export const copyText = (text: string) => call<void>('copy_text', { text });
 
 export const doctor = () => call<Diagnosis[]>('doctor');
 export const prepareRepair = (id: string) => call<Prepared>('prepare_repair', { id });

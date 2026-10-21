@@ -129,6 +129,10 @@ The other tools, under **More tools** in the sidebar:
   default: light or dark as the desktop's color scheme is, through GTK,
   and changing with it), **Dark** or **Light**. It applies at once and is
   kept as `window_theme`; the run's terminal stays dark in either.
+  **Make a bug report…** (also in the palette) shows what
+  `helix-toolbox report` prints, with the window's version, how it was
+  installed, WebKitGTK, the desktop and the theme after it, and copies it
+  to paste into an issue.
   The Install Plan's **Save as profile** adds a profile to the Profiles
   area; a profile's details have **Put its entries in the plan**, to queue
   its entries one by one and change the plan before it runs. Your own
@@ -213,6 +217,7 @@ Its commands:
 | `close_run` | records the run in the history |
 | `runs` | the history |
 | `save_profile` | the Install Plan as a profile |
+| `bug_report`, `copy_text` | `helix-toolbox report` with the window's facts, and text put on the clipboard |
 | `import_profile`, `export_profile`, `delete_profile` | your profiles: one added from a file, written to one, or deleted; the file is chosen in the file chooser unless a path is given |
 | `doctor`, `prepare_repair` | the health checks, and a repair ready to confirm |
 | `updates`, `prepare_channels`, `prepare_update` | the update channels, and updating channels or entries |
@@ -263,8 +268,8 @@ is tested where no pointer reaches it. `scripts/gui-smoke.sh BINARY` runs
 folders for the home and settings: the wizard on the first start, the
 palette, every screen, a run of the marker fixture through the
 confirmation and the terminal, a saved profile exported, deleted and
-imported again, and the Remove button; then it checks the files those
-left. The Checks workflow runs it under `xvfb-run` on every
+imported again, the Remove button, and a bug report from a stand-in
+command line; then it checks the files those left. The Checks workflow runs it under `xvfb-run` on every
 change; by hand, inside a virtual session:
 
 ```sh

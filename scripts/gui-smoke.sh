@@ -3,8 +3,8 @@
 # Drive a debug build of the window through the setup wizard, the command
 # palette, the theme, the keyboard, every screen, a run with its change
 # preview, the removal of a package entry, a saved profile exported,
-# deleted and imported again, and the offline bundles screen, against the
-# fixture catalog, and check what the drive script reports.
+# deleted and imported again, the offline bundles screen and a bug report,
+# against the fixture catalog, and check what the drive script reports.
 # usage: scripts/gui-smoke.sh BINARY
 # BINARY is a debug build with the frontend in it (cargo build --features
 # tauri/custom-protocol in apps/helix-toolbox-gui/src-tauri, after npm run
@@ -29,6 +29,10 @@ cp apps/helix-toolbox-gui/tests/drive/removable.toml "$work/catalog/catalog/tool
 printf 'tabs = ["tools", "profiles"]\n' > "$work/catalog/catalog/tabs.toml"
 mkdir "$work/catalog/catalog/profiles"
 printf 'name = "Profiles"\n' > "$work/catalog/catalog/profiles/tab.toml"
+# A stand-in command line that only prints a report, for the bug report.
+mkdir "$work/bin"
+cp apps/helix-toolbox-gui/tests/drive/helix-toolbox "$work/bin/helix-toolbox"
+export PATH="$work/bin:$PATH"
 mkdir -p "$work/home" "$work/config" "$work/state" "$work/data" "$work/cache"
 export HOME="$work/home"
 export XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" \

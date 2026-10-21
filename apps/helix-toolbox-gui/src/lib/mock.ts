@@ -232,6 +232,27 @@ export async function call(command: string, args: Record<string, unknown> = {}):
       return 'Workstation (4 entries) is imported as /home/me/.config/helix-toolbox/profiles/workstation.toml. It is under Profiles, Your profiles.';
     case 'export_profile':
       return `${find(args.id as string)?.name} is exported to /home/me/${(args.id as string).replace('profile-', '')}.toml.`;
+    case 'copy_text':
+      await navigator.clipboard?.writeText(args.text as string).catch(() => undefined);
+      return undefined;
+    case 'bug_report':
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      return [
+        '### Helix Toolbox report',
+        '',
+        '- Helix Toolbox: 1.13.0',
+        '- Installed from: package',
+        '- Distribution: Garuda Linux (garuda, like arch)',
+        '- Package manager: pacman (Arch family)',
+        '',
+        '### The window',
+        '',
+        '- Helix Toolbox window: 1.13.0',
+        '- Installed from: package',
+        '- WebKitGTK: 2.50.4',
+        '- Desktop: KDE, wayland session',
+        '- Theme: system',
+      ].join('\n');
     case 'delete_profile':
       return `${find(args.id as string)?.name} is deleted.`;
     case 'doctor':
