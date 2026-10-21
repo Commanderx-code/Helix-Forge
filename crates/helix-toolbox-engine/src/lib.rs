@@ -37,6 +37,7 @@ pub mod setup;
 pub mod trust;
 pub mod updates;
 pub mod verification;
+pub mod watch;
 
 use helix_toolbox_core::{
     Action, Entry, NativeAction, NixAction, PackageManager, Risk, Verify, valid_package_name,

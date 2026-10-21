@@ -379,7 +379,23 @@
       await sleep(200);
     }
     await until('the switch off', () => box() && !box().checked && !box().disabled);
-    return 'on, then off';
+    // Health problems alone keep the timer, and turning them off removes it.
+    const health = () => withText('label.toggle', 'Helix Doctor finds a new problem')?.querySelector('input');
+    (await until('the health switch', () => health() && !health().disabled && health())).click();
+    const healthTold = await until('what turning on did', () => document.querySelector('#notice-title')?.closest('[role="dialog"]'));
+    if (!healthTold.textContent.includes('Helix Doctor finds a new problem')) throw new Error(healthTold.textContent);
+    await click('OK', healthTold);
+    const watched = await invoke('read_settings');
+    if (watched.health !== true || watched.notifications !== false) throw new Error(JSON.stringify(watched));
+    await accessible('Settings with health notifications on');
+    await until('the health switch on', () => health()?.checked && !health().disabled);
+    health().click();
+    const off = Date.now();
+    while ((await invoke('read_settings')).health !== false) {
+      if (Date.now() - off > 20000) throw new Error('health notifications are not off');
+      await sleep(200);
+    }
+    return 'updates on, then off; health problems on, then off';
   });
 
   await trace(window.axe ? `axe-core ${window.axe.version} checked the screens` : 'axe-core was not loaded; nothing was checked for accessibility');
