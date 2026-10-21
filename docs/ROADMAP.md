@@ -57,6 +57,8 @@ The items:
 - [x] A desktop notification when updates are waiting, from a systemd user
       timer, turned on and off in either Settings or with
       `helix-toolbox notifications`
+- [x] The window's packages and AppImage installed and opened on every
+      distribution the command line is tested on, before each release
 
 ## v1.13.0: the window does the rest
 
