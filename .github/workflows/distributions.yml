@@ -478,7 +478,10 @@ jobs:
           # systemctl and a notify-send that only write down what they were
           # asked.
           mkdir -p stand-ins
+          # The stand-ins' own text, expanded when they run.
+          # shellcheck disable=SC2016
           printf '#!/bin/sh\necho "$*" >> "%s/systemctl.log"\n' "$PWD" > stand-ins/systemctl
+          # shellcheck disable=SC2016
           printf '#!/bin/sh\n[ "$1" = --help ] && exit 0\nprintf "%%s\\n" "$@" > "%s/notified.txt"\n' "$PWD" > stand-ins/notify-send
           chmod +x stand-ins/*
           export PATH="$PWD/stand-ins:$PATH" XDG_CONFIG_HOME="$PWD/notify-config" XDG_STATE_HOME="$PWD/notify-state"
