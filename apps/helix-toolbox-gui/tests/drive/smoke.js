@@ -269,6 +269,24 @@
     return `Marker: ${state}; a missing folder: ${said.textContent.trim()}`;
   });
 
+  await step('an installed package entry offers removal, which the engine plans', async () => {
+    key(window, 'k', { ctrlKey: true });
+    const input = await until('the palette', () => document.querySelector('[aria-label="Command palette"] input'));
+    await type(input, 'removable sample');
+    key(input, 'Enter');
+    const details = await until('the details', () => withText('aside h2', 'Removable Sample')?.closest('aside'));
+    // The button waits for the status check to find it installed.
+    await click('Remove', details);
+    const title = await until('the confirmation', () => document.querySelector('#confirm-title'));
+    const dialog = title.closest('[role="dialog"]');
+    const said = dialog.textContent;
+    if (!said.includes('not by a package Helix Toolbox knows')) throw new Error(said.trim());
+    await accessible('the removal');
+    await click('OK', dialog);
+    await until('the confirmation to close', () => !document.querySelector('#confirm-title'));
+    return `${title.textContent.trim()}: installed, but not by a package Helix Toolbox knows`;
+  });
+
   await trace(window.axe ? `axe-core ${window.axe.version} checked the screens` : 'axe-core was not loaded; nothing was checked for accessibility');
   await trace(failed ? 'DONE with failures' : 'DONE');
   await sleep(300);

@@ -4,6 +4,14 @@ Each release is tagged `vMAJOR.MINOR.PATCH` on GitHub, with the program, its
 packages and their checksums. A release whose workflow only adopted updated
 dotfiles or Myfish sources raises the patch number and is not listed here.
 
+## v1.13.0
+
+- **Remove a package from the window.** An installed package entry that
+  offers removal has **Remove…** in its details, as `r` in the terminal
+  interface and `helix-toolbox remove`: removed by the package manager or
+  Flatpak that installed it, after the same confirmation and change
+  preview.
+
 ## v1.12.0
 
 - **What a plan changes, in the window.** The confirmation's **What it

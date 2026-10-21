@@ -50,6 +50,8 @@ pub struct EntryView {
     pub queueable: bool,
     /// Whether it asks questions while it runs.
     pub interactive: bool,
+    /// A package entry that offers removal.
+    pub removable: bool,
     /// The entries a profile runs, in order.
     pub runs: Vec<String>,
 }
@@ -95,6 +97,13 @@ pub fn entry_view(entry: &Entry) -> EntryView {
         kind,
         queueable: entry.multi_select,
         interactive,
+        removable: matches!(
+            entry.action,
+            Action::Package {
+                removable: true,
+                ..
+            }
+        ),
         runs,
     }
 }
@@ -519,6 +528,16 @@ mod tests {
         let bundle = items.iter().find(|item| item["id"] == "bundle").unwrap();
         assert_eq!(bundle["kind"], "profile");
         assert_eq!(bundle["runs"], json!(["marker", "report"]));
+    }
+
+    #[test]
+    fn a_package_entry_says_whether_it_offers_removal() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tests/fixtures/packages");
+        let catalog = Catalog::from_directory(&root, true).expect("the package fixtures load");
+        let sample = catalog.find("fallback-sample").unwrap();
+        assert!(entry_view(sample).removable);
+        let greeter = fixtures();
+        assert!(!entry_view(greeter.find("greeter").unwrap()).removable);
     }
 
     #[test]

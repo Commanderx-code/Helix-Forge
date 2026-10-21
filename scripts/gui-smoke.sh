@@ -2,8 +2,9 @@
 
 # Drive a debug build of the window through the setup wizard, the command
 # palette, the theme, the keyboard, every screen, a run with its change
-# preview, a saved profile and the offline bundles screen, against the
-# fixture catalog, and check what the drive script reports.
+# preview, the removal of a package entry, a saved profile and the offline
+# bundles screen, against the fixture catalog, and check what the drive
+# script reports.
 # usage: scripts/gui-smoke.sh BINARY
 # BINARY is a debug build with the frontend in it (cargo build --features
 # tauri/custom-protocol in apps/helix-toolbox-gui/src-tauri, after npm run
@@ -18,10 +19,12 @@ cd "$(dirname -- "$0")/.."
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' 0
-# The fixture catalog plus the wizard's workstations; the fixtures
-# themselves have none, so the terminal interface's tests see no wizard.
+# The fixture catalog plus the wizard's workstations and a removable
+# package entry; the fixtures themselves have neither, so the terminal
+# interface's tests see no wizard and the same entries.
 cp -r tests/fixtures "$work/catalog"
 cp apps/helix-toolbox-gui/tests/drive/setup.toml "$work/catalog/catalog/setup.toml"
+cp apps/helix-toolbox-gui/tests/drive/removable.toml "$work/catalog/catalog/tools/removable.toml"
 mkdir -p "$work/home" "$work/config" "$work/state" "$work/data" "$work/cache"
 export HOME="$work/home"
 export XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" \

@@ -16,7 +16,7 @@ use helix_toolbox_engine::{
     hardware, history,
     inventory::{Inventory, which},
     overview::Overview,
-    plan, preflight, preview, profiles,
+    plan, plan_removal, preflight, preview, profiles,
     reliability::{self, Evidence},
     settings::{self, RunChoices, WindowTheme},
     setup, trust, updates,
@@ -531,6 +531,27 @@ async fn prepare_update(app: AppHandle, ids: Vec<String>) -> Result<PreparedView
         let entries: Vec<&Entry> = ids.iter().filter_map(|id| catalog.find(id)).collect();
         let planned = inventory.plan_update(entries, &gui.platform, &which);
         prepare_plan(gui, &catalog, planned)
+    })
+    .await
+}
+
+/// Remove these package entries, through the package manager or Flatpak
+/// that installed them, as the terminal interface's `r` does.
+#[tauri::command]
+async fn prepare_remove(app: AppHandle, ids: Vec<String>) -> Result<PreparedView, String> {
+    blocking(app, move |gui| {
+        let catalog = gui.catalog.read().unwrap();
+        let Some(entries) = ids
+            .iter()
+            .map(|id| catalog.find(id))
+            .collect::<Option<Vec<&Entry>>>()
+        else {
+            return cannot(gui, "That entry is not in the catalog.".into());
+        };
+        match plan_removal(entries, &gui.platform) {
+            Ok(planned) => prepare_plan(gui, &catalog, planned),
+            Err(error) => cannot(gui, error.to_string()),
+        }
     })
     .await
 }
@@ -1382,7 +1403,7 @@ fn main() {
                 about, areas, statuses, favorites, pin, prepare, changes, download_sources, cancel,
                 run, write, resize,
                 stop, close_run, runs, save_profile, doctor, prepare_repair, updates,
-                prepare_channels, prepare_update, list_backups, prepare_restore, drift_targets,
+                prepare_channels, prepare_update, prepare_remove, list_backups, prepare_restore, drift_targets,
                 drift_check, save_baseline, reliability, trust, read_hardware, prepare_firmware,
                 prepare_smart, read_desktop, save_look, prepare_look, read_settings,
                 save_settings, save_theme, bundle_contents, prepare_bundle_create,

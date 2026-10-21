@@ -52,7 +52,10 @@ others: `sha256sum --check --ignore-missing SHA256SUMS` and
   queues it in the Install Plan; selecting one shows its details, with
   **Add to plan**, **Run now** and **Pin**. An entry that runs on its own
   (interactive installers, for example) has **Run now** only, as in the
-  terminal interface.
+  terminal interface. A package entry that offers removal and is
+  installed has **Remove…** too, the terminal interface's `r`: the package
+  manager or Flatpak that installed it removes it, after the same
+  confirmation.
 - **Favorites**: the pinned entries, the same `favorites.toml` the
   terminal interface keeps.
 - **Install Plan**: the queue, in the order it will be planned; entries can
