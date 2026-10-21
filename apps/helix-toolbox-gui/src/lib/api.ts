@@ -59,6 +59,7 @@ export const prepareRepair = (id: string) => call<Prepared>('prepare_repair', { 
 export const updates = (online: boolean) => call<UpdatesView>('updates', { online });
 export const prepareChannels = (ids: string[]) => call<Prepared>('prepare_channels', { ids });
 export const prepareUpdate = (ids: string[]) => call<Prepared>('prepare_update', { ids });
+export const prepareRemove = (ids: string[]) => call<Prepared>('prepare_remove', { ids });
 
 export const backups = () => call<BackupsView>('list_backups');
 export const prepareRestore = (index: number) => call<Prepared>('prepare_restore', { index });

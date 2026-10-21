@@ -52,6 +52,11 @@ The items:
     replaces a copy the user keeps outside any package tool, and the
     window's AppImage.
 
+## v1.13.0: the window does the rest
+
+- [x] Remove a package entry from the window, as the terminal interface's
+      `r` does
+
 ## v1.12.0: the window catches up
 
 - [x] The change preview in the window's confirmation, with files side by

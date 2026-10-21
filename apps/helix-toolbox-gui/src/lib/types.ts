@@ -38,6 +38,8 @@ export type EntryView = {
   kind: 'package' | 'script' | 'command' | 'nix' | 'native' | 'profile';
   queueable: boolean;
   interactive: boolean;
+  /** A package entry that offers removal. */
+  removable: boolean;
   runs: string[];
 };
 

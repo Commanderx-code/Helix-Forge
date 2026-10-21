@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
   import StatusBadge from './StatusBadge.svelte';
+  import * as api from '../lib/api';
   import { flags, KINDS } from '../lib/flags';
   import { toolbox } from '../lib/state.svelte';
 
@@ -9,6 +10,9 @@
   const status = $derived(entry ? toolbox.statuses[entry.id] : undefined);
   const queued = $derived(entry ? toolbox.isQueued(entry.id) : false);
   const pinned = $derived(entry ? toolbox.favorites.includes(entry.id) : false);
+  // As the terminal interface's `r`: a package entry that offers removal,
+  // once it is found on this machine.
+  const removable = $derived(entry?.removable && (status?.kind === 'installed' || status?.kind === 'update'));
 </script>
 
 <aside class="card">
@@ -73,6 +77,15 @@
       >
         <Icon name="play" size={14} /> Run now
       </button>
+      {#if removable}
+        <button
+          class="button danger"
+          disabled={toolbox.preparing || toolbox.busy}
+          onclick={() => toolbox.reviewWith(() => api.prepareRemove([entry.id]), [entry.id])}
+        >
+          <Icon name="trash" size={14} /> Remove…
+        </button>
+      {/if}
       <button class="button ghost" title={pinned ? 'Unpin' : 'Pin to Favorites'} onclick={() => toolbox.togglePin(entry.id)}>
         <Icon name="star" size={16} />
         {pinned ? 'Unpin' : 'Pin'}

@@ -12,6 +12,7 @@ const entry = (id: string, name: string, description: string, flags = 'I', extra
   kind: 'package',
   queueable: true,
   interactive: false,
+  removable: (extra.kind ?? 'package') === 'package',
   runs: [],
   ...extra,
 });
@@ -315,6 +316,17 @@ export async function call(command: string, args: Record<string, unknown> = {}):
         header: ['Risk: medium · asks for your password', 'Note: The packages are checked against the bundle\'s checksums and signatures first.'],
         lines: [{ name: 'Install the bundle\'s packages', detail: 'sudo pacman -U --needed packages/*.pkg.tar.zst' }],
       } satisfies Prepared;
+    case 'prepare_remove': {
+      planned = (args.ids as string[]).map((id) => find(id)).filter((e): e is EntryView => !!e);
+      const result: Prepared = {
+        kind: 'ready',
+        risk: 'medium',
+        privileged: true,
+        header: ['Risk: medium · asks for your password'],
+        lines: planned.map((entry) => ({ name: `Remove ${entry.name}`, detail: `sudo pacman -R ${entry.id}` })),
+      };
+      return result;
+    }
     case 'save_theme':
       theme = args.theme as WindowTheme;
       return call('read_settings');
