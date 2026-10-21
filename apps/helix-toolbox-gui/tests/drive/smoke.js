@@ -249,9 +249,36 @@
     const text = notice.parentElement.querySelector('pre').textContent;
     if (!text.includes('is saved')) throw new Error(text);
     await click('OK');
-    // The fixture catalog has no Profiles area to show it in; the runner
-    // checks the saved file.
     return text.split(' is saved')[0] + ' is saved';
+  });
+
+  await step('your profile is exported, deleted and imported again', async () => {
+    await click('Profiles', document.querySelector('nav'));
+    await until('the Profiles area', () => screenTitle() === 'Profiles');
+    if (!button('Import a profile')) throw new Error('no Import a profile button');
+    const row = await until('the saved profile', () => withText('.list .select', 'Smoke profile'));
+    row.click();
+    const details = await until('the details', () => withText('aside h2', 'Smoke profile')?.closest('aside'));
+    if (!button('Export', details)) throw new Error('no Export button');
+    await accessible('your profile');
+    // The file chooser is the desktop's, out of reach here: the commands
+    // take the file instead, in the scratch settings folder.
+    const { path } = await invoke('read_settings');
+    const file = path.replace(/settings\.toml$/, 'exported.toml');
+    const exported = await invoke('export_profile', { id: 'profile-smoke-profile', path: file });
+    if (!exported?.includes('is exported to')) throw new Error(exported);
+    await click('Delete', details);
+    const input = await until('the confirmation', () => document.querySelector('#prompt-title') && document.querySelector('[role="dialog"] input'));
+    await type(input, 'DELETE');
+    key(input, 'Enter');
+    await until('the notice', () => withText('#notice-title', 'Profile deleted'));
+    await click('OK');
+    await until('the profile gone', () => !withText('.list .select', 'Smoke profile'));
+    const imported = await invoke('import_profile', { path: file });
+    if (!imported?.includes('is imported as')) throw new Error(imported);
+    const areas = await invoke('areas');
+    if (!JSON.stringify(areas).includes('"profile-smoke-profile"')) throw new Error('the imported profile is not in Profiles');
+    return 'exported, deleted, imported';
   });
 
   await step('the Offline bundles screen reads the plan and checks a folder', async () => {

@@ -13,6 +13,7 @@ const entry = (id: string, name: string, description: string, flags = 'I', extra
   queueable: true,
   interactive: false,
   removable: (extra.kind ?? 'package') === 'package',
+  yours: false,
   runs: [],
   ...extra,
 });
@@ -74,6 +75,20 @@ const AREAS: AreaView[] = [
       entry('mirrors', 'Refresh mirrors', 'Rank the fastest package mirrors.', 'MP', { kind: 'script' }),
       entry('cache', 'Clean package cache', 'Keep the last two versions of each package.', 'MP', { kind: 'command' }),
       entry('report', 'System report', 'Write a report of this machine for a bug report.', '', { kind: 'native' }),
+    ],
+  },
+  {
+    id: 'profiles',
+    name: 'Profiles',
+    items: [
+      group('your-profiles', 'Your profiles', 'Saved in /home/me/.config/helix-toolbox/profiles', [
+        entry('profile-my-workstation', 'My workstation', 'Your profile: git, neovim, ripgrep, firefox.', '', {
+          kind: 'profile',
+          yours: true,
+          runs: ['git', 'neovim', 'ripgrep', 'firefox'],
+        }),
+      ]),
+      entry('developer-basics', 'Developer basics', 'Git, Neovim, Ripgrep and fzf.', '', { kind: 'profile', runs: ['git', 'neovim', 'ripgrep', 'fzf'] }),
     ],
   },
 ];
@@ -213,6 +228,12 @@ export async function call(command: string, args: Record<string, unknown> = {}):
       return RUNS;
     case 'save_profile':
       return `${args.name} (${(args.ids as string[]).length} entries) is saved.`;
+    case 'import_profile':
+      return 'Workstation (4 entries) is imported as /home/me/.config/helix-toolbox/profiles/workstation.toml. It is under Profiles, Your profiles.';
+    case 'export_profile':
+      return `${find(args.id as string)?.name} is exported to /home/me/${(args.id as string).replace('profile-', '')}.toml.`;
+    case 'delete_profile':
+      return `${find(args.id as string)?.name} is deleted.`;
     case 'doctor':
       return [
         { id: 'network', title: 'Network', health: 'good', health_label: 'OK', summary: 'Connected through wlp0s20f3', evidence: [], advice: null, repair: null, entry: null },

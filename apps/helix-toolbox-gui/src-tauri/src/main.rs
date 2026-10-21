@@ -7,7 +7,7 @@
 mod views;
 
 use helix_toolbox_catalog::Catalog;
-use helix_toolbox_core::{Action, Entry};
+use helix_toolbox_core::{Action, Entry, printable};
 use helix_toolbox_engine::{
     Plan, backups, bundle,
     confirmation::{self, Prepared},
@@ -30,6 +30,7 @@ use std::{
     sync::{Mutex, RwLock},
 };
 use tauri::{AppHandle, Manager, State, ipc::Channel};
+use tauri_plugin_dialog::DialogExt;
 use views::{
     AreaView, BackupView, BundleContentsView, BundleView, ChangesView, ChannelView, DiagnosisView,
     PreparedView, RecordView, StatusView,
@@ -417,6 +418,117 @@ fn save_profile(gui: State<Gui>, name: String, ids: Vec<String>) -> Result<Strin
         path.display(),
         profile.name
     ))
+}
+
+/// One of the user's own profiles, by its catalog id: its file and what it
+/// holds.
+fn own_profile(catalog: &Catalog, id: &str) -> Result<(PathBuf, profiles::Profile), String> {
+    let directory = profiles::dir().ok_or("cannot find the configuration folder")?;
+    let slug = id
+        .strip_prefix(profiles::PREFIX)
+        .and_then(profiles::slug)
+        .filter(|slug| id == format!("{}{slug}", profiles::PREFIX))
+        .ok_or_else(|| format!("{} is not one of your profiles", printable(id)))?;
+    let path = directory.join(format!("{slug}.toml"));
+    let profile = profiles::read(&path, catalog).map_err(|error| error.to_string())?;
+    Ok((path, profile))
+}
+
+/// The file chooser, over the window: a profile file to read, or where to
+/// write one. None when it was closed.
+fn choose_profile_file(app: &AppHandle, save_as: Option<String>) -> Option<PathBuf> {
+    let mut chooser = app
+        .dialog()
+        .file()
+        .add_filter("Helix Toolbox profile", &["toml"]);
+    if let Some(window) = app.get_webview_window("main") {
+        chooser = chooser.set_parent(&window);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        chooser = chooser.set_directory(home);
+    }
+    let chosen = match save_as {
+        Some(name) => chooser
+            .set_title("Export the profile")
+            .set_file_name(name)
+            .blocking_save_file(),
+        None => chooser.set_title("Import a profile").blocking_pick_file(),
+    };
+    chosen.and_then(|chosen| chosen.into_path().ok())
+}
+
+/// Add a profile file to the user's profiles, as `helix-toolbox profile
+/// import` does: from `path`, or a file chosen in the file chooser. None
+/// when the chooser was closed.
+#[tauri::command]
+async fn import_profile(app: AppHandle, path: Option<String>) -> Result<Option<String>, String> {
+    let handle = app.clone();
+    blocking(app, move |gui| {
+        let Some(path) = path
+            .map(PathBuf::from)
+            .or_else(|| choose_profile_file(&handle, None))
+        else {
+            return Ok(None);
+        };
+        let mut catalog = gui.catalog.write().unwrap();
+        let profile = profiles::read(&path, &catalog).map_err(|error| error.to_string())?;
+        let directory = profiles::dir().ok_or("cannot find the configuration folder")?;
+        let saved =
+            profiles::save(&directory, &profile, &catalog).map_err(|error| error.to_string())?;
+        profiles::add_to(&mut catalog, &directory);
+        Ok(Some(format!(
+            "{} ({} entries) is imported as {}. It is under Profiles, Your profiles.",
+            printable(&profile.name),
+            profile.entries.len(),
+            saved.display()
+        )))
+    })
+    .await?
+}
+
+/// Write one of the user's profiles to a file to share, as `helix-toolbox
+/// profile export` does: to `path`, or where the file chooser says. None
+/// when the chooser was closed.
+#[tauri::command]
+async fn export_profile(
+    app: AppHandle,
+    id: String,
+    path: Option<String>,
+) -> Result<Option<String>, String> {
+    let handle = app.clone();
+    blocking(app, move |gui| {
+        let (own, profile) = own_profile(&gui.catalog.read().unwrap(), &id)?;
+        let file_name = own.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let Some(path) = path
+            .map(PathBuf::from)
+            .or_else(|| choose_profile_file(&handle, Some(file_name)))
+        else {
+            return Ok(None);
+        };
+        if path.extension().is_none_or(|extension| extension != "toml") {
+            return Err("A profile is written to a .toml file.".to_string());
+        }
+        profiles::write(&path, &profile).map_err(|error| error.to_string())?;
+        Ok(Some(format!(
+            "{} is exported to {}. On another machine: Import a profile in Profiles, or helix-toolbox profile import.",
+            printable(&profile.name),
+            path.display()
+        )))
+    })
+    .await?
+}
+
+/// Delete one of the user's profiles, as `helix-toolbox profile delete` does.
+#[tauri::command]
+fn delete_profile(gui: State<Gui>, id: String) -> Result<String, String> {
+    let mut catalog = gui.catalog.write().unwrap();
+    let (path, profile) = own_profile(&catalog, &id)?;
+    std::fs::remove_file(&path)
+        .map_err(|error| format!("cannot delete {}: {error}", path.display()))?;
+    if let Some(directory) = profiles::dir() {
+        profiles::add_to(&mut catalog, &directory);
+    }
+    Ok(format!("{} is deleted.", printable(&profile.name)))
 }
 
 // Doctor
@@ -1396,13 +1508,16 @@ fn main() {
         backups: Mutex::new(Vec::new()),
         hardware: Mutex::new(None),
     };
-    let builder = tauri::Builder::default().manage(gui);
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .manage(gui);
     macro_rules! commands {
         ($($extra:ident),*) => {
             tauri::generate_handler![
                 about, areas, statuses, favorites, pin, prepare, changes, download_sources, cancel,
                 run, write, resize,
-                stop, close_run, runs, save_profile, doctor, prepare_repair, updates,
+                stop, close_run, runs, save_profile, import_profile, export_profile,
+                delete_profile, doctor, prepare_repair, updates,
                 prepare_channels, prepare_update, prepare_remove, list_backups, prepare_restore, drift_targets,
                 drift_check, save_baseline, reliability, trust, read_hardware, prepare_firmware,
                 prepare_smart, read_desktop, save_look, prepare_look, read_settings,
@@ -1445,6 +1560,27 @@ mod tests {
         );
         assert_eq!(catalog_dir(&args(&["gui"])), None);
         assert_eq!(catalog_dir(&args(&["gui", "--catalog-dir"])), None);
+    }
+
+    #[test]
+    fn a_profile_is_found_by_its_exact_id_inside_the_profiles_folder() {
+        let catalog = Catalog::from_directory(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tests/fixtures"),
+            true,
+        )
+        .unwrap();
+        for id in [
+            "developer-basics",
+            "profile-../../etc/passwd",
+            "profile-Work",
+            "profile-",
+        ] {
+            let refused = own_profile(&catalog, id).unwrap_err();
+            assert!(
+                refused.contains("is not one of your profiles"),
+                "{id}: {refused}"
+            );
+        }
     }
 
     #[test]
