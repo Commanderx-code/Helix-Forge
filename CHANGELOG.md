@@ -22,6 +22,8 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   drivers (no serial numbers, host name or user) and opens a new issue form
   filled in; once checked, it becomes the entry's **Hardware Tested**
   record. It is refused for a run that failed and in a virtual machine.
+- The window's 256-pixel icon is installed where desktops look for it,
+  not in a `256x256@2` folder they skip.
 
 ## v1.14.0
 
