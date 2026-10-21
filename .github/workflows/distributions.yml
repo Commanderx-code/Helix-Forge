@@ -472,6 +472,35 @@ jobs:
           grep -q '^Helix Toolbox: Flathub finished, but Missing Sample is not installed' missing.txt
           hf history --limit 1 | grep -q 'failed | Missing Sample | exit 1'
           rm /usr/bin/flatpak
+      - name: Update notifications, with stand-ins for systemd and the desktop
+        run: |
+          # No user systemd runs in a container (the openSUSE VM has one): a
+          # systemctl and a notify-send that only write down what they were
+          # asked.
+          mkdir -p stand-ins
+          # The stand-ins' own text, expanded when they run.
+          # shellcheck disable=SC2016
+          printf '#!/bin/sh\necho "$*" >> "%s/systemctl.log"\n' "$PWD" > stand-ins/systemctl
+          # shellcheck disable=SC2016
+          printf '#!/bin/sh\n[ "$1" = --help ] && exit 0\nprintf "%%s\\n" "$@" > "%s/notified.txt"\n' "$PWD" > stand-ins/notify-send
+          chmod +x stand-ins/*
+          export PATH="$PWD/stand-ins:$PATH" XDG_CONFIG_HOME="$PWD/notify-config" XDG_STATE_HOME="$PWD/notify-state"
+          units=notify-config/systemd/user
+          bin/helix-toolbox notifications on
+          bin/helix-toolbox notifications | grep -q '^Update notifications: on'
+          test -L $units/timers.target.wants/helix-toolbox-updates.timer
+          grep -qx -- '--user start helix-toolbox-updates.timer' systemctl.log
+          # systemd's own reading of the units, where the image has it.
+          if [ -x /usr/bin/systemd-analyze ]; then
+            /usr/bin/systemd-analyze verify $units/helix-toolbox-updates.timer $units/helix-toolbox-updates.service
+          fi
+          bin/helix-toolbox notifications check | tee check.txt
+          if grep -q 'waiting$' check.txt; then
+            grep -qx -- '--app-name=Helix Toolbox' notified.txt
+          fi
+          bin/helix-toolbox notifications off
+          test ! -e $units/helix-toolbox-updates.timer
+          test ! -e $units/timers.target.wants/helix-toolbox-updates.timer
       - name: Script and native entries
         run: |
           bin/helix-toolbox run system-report machine-summary --yes | tee report.txt
