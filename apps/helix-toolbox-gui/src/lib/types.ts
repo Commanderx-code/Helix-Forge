@@ -10,8 +10,8 @@ export type About = {
   /** The first start on this machine: the setup wizard opens by itself. */
   first_run: boolean;
   theme: WindowTheme;
-  /** Started from the update notification: open on Updates. */
-  open_updates: boolean;
+  /** Started from a notification: the screen to open on. */
+  opens: 'updates' | 'doctor' | 'drift' | null;
 };
 
 /** The window's colors: the desktop's preference, or always dark or light. */
@@ -258,6 +258,12 @@ export type SettingsView = {
   theme: WindowTheme;
   /** Whether update notifications are on; null with no home folder for their timer. */
   notifications: boolean | null;
+  /** Whether new health problems are told of; null as above. */
+  health: boolean | null;
+  /** The baseline Drift is watched against, by its file name. */
+  drift: string | null;
+  /** The saved baselines: file name and name. */
+  baselines: [string, string][];
 };
 
 // Offline bundles

@@ -142,6 +142,20 @@ the PATH. The check never updates anything. `helix-toolbox notifications
 off` stops the timer and removes the units and `notified.txt`. A machine
 without systemd gets no files and says so.
 
+The same timer can watch more, each read-only and told only when something
+is new: **Tell me of new health problems** (`helix-toolbox notifications
+health on`) runs Helix Doctor's health checks and tells of a check that has
+become a problem since it last told (a failed service, a disk filling up,
+checks after a reboot that did not hold); the network and DNS checks, which
+come and go, are left out. **Tell me when it drifts from a baseline**
+(`helix-toolbox notifications drift <baseline>`, or `off`) compares the
+machine with a saved Drift baseline and tells of each new difference once.
+Their buttons open the window on Helix Doctor (`--doctor`) or Drift
+(`--drift`). Nothing is repaired or put back by itself. The choices are kept
+under `[watch]` in `settings.toml`, what was told in `health-told.json` and
+`drift-told.json` beside `notified.txt`; the timer is on while any choice
+is, and `helix-toolbox notifications` says which.
+
 Script entries such as Steam, VS Code or Firefox show the same status when
 they say what they install (most application scripts do), and `u` updates
 that package; a script entry without it shows only its flags and is updated
@@ -450,7 +464,8 @@ helix-toolbox status                     # every package entry: installed, updat
 helix-toolbox update --dry-run           # what updating every entry with an update would run
 helix-toolbox updates --online           # what each package tool has waiting
 helix-toolbox updates --apply --dry-run  # what updating those channels would run
-helix-toolbox notifications on           # tell me on the desktop when updates wait; off, check, or nothing for whether it is on
+helix-toolbox notifications on           # tell me on the desktop when updates wait; off, check, or nothing for what is on
+helix-toolbox notifications health on    # and of new health problems; drift <baseline> for Drift
 helix-toolbox plan git system-report     # what running entries would do
 helix-toolbox run git --dry-run          # the plan, nothing changed
 helix-toolbox run git                    # runs after you type RUN, asked on the terminal even when piped

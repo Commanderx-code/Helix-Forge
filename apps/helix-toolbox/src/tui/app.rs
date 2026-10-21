@@ -25,6 +25,7 @@ use helix_toolbox_engine::{
     notifications,
     overview::Overview,
     plan, plan_removal, preflight, profiles, reliability, updates,
+    watch::{self, Watch},
 };
 use helix_toolbox_platform::LinuxInfo;
 use ratatui::{
@@ -2211,10 +2212,29 @@ impl App {
             ),
             (
                 "Tell me when updates are waiting".to_string(),
-                match &self.notices {
+                match self.watching() {
                     None => "not available here".to_string(),
-                    Some(places) if notifications::is_on(places) => {
-                        format!("yes, {}", notifications::EVERY)
+                    Some(watch) if watch.updates => format!("yes, {}", notifications::EVERY),
+                    Some(_) => "no".to_string(),
+                },
+            ),
+            (
+                "Tell me of new health problems".to_string(),
+                match self.watching() {
+                    None => "not available here".to_string(),
+                    Some(watch) if watch.health => "yes".to_string(),
+                    Some(_) => "no".to_string(),
+                },
+            ),
+            (
+                "Tell me when it drifts from a baseline".to_string(),
+                match self.watching() {
+                    None => "not available here".to_string(),
+                    Some(Watch {
+                        drift: Some(slug), ..
+                    }) => format!("from {slug}"),
+                    Some(_) if self.baseline_slugs().is_empty() => {
+                        "no (save one in Drift)".to_string()
                     }
                     Some(_) => "no".to_string(),
                 },
@@ -5341,58 +5361,98 @@ impl App {
                 self.snapshots = !self.snapshots;
                 self.save_look();
             }
-            6 => self.toggle_notifications(),
-            7 => self.open_wizard(false),
-            8 => self.make_report(),
+            6 => self.change_watch(|watch| watch.updates = !watch.updates),
+            7 => self.change_watch(|watch| watch.health = !watch.health),
+            8 => {
+                // The next saved baseline, then none.
+                let slugs = self.baseline_slugs();
+                self.change_watch(|watch| {
+                    let next = match &watch.drift {
+                        None => 0,
+                        Some(slug) => slugs
+                            .iter()
+                            .position(|other| other == slug)
+                            .map_or(0, |at| at + 1),
+                    };
+                    watch.drift = slugs.get(next).cloned();
+                })
+            }
+            9 => self.open_wizard(false),
+            10 => self.make_report(),
             _ => {}
         }
     }
 
-    /// Turn the update notifications' timer on or off.
-    fn toggle_notifications(&mut self) {
-        let Some(places) = self.notices.clone() else {
+    /// What the scheduled check watches; none where it cannot run.
+    fn watching(&self) -> Option<Watch> {
+        let places = self.notices.as_ref()?;
+        self.settings_path.as_ref()?;
+        Some(watch::read(places, self.settings_path.as_deref()))
+    }
+
+    /// The saved baselines' file names, for the Drift choice.
+    fn baseline_slugs(&self) -> Vec<String> {
+        self.drift_dir()
+            .map(|directory| {
+                drift::load_all(&directory)
+                    .0
+                    .into_iter()
+                    .map(|(slug, _)| slug)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Change what the scheduled check watches, and its timer with it.
+    fn change_watch(&mut self, how: impl FnOnce(&mut Watch)) {
+        let (Some(places), Some(path)) = (self.notices.clone(), self.settings_path.clone()) else {
             return;
         };
-        let told = if notifications::is_on(&places) {
-            notifications::turn_off(&places, &self.systemctl).map(|()| None)
-        } else {
-            std::env::current_exe()
-                .map_err(|error| format!("cannot tell where this program is: {error}"))
-                .and_then(|program| {
-                    notifications::turn_on(
-                        &places,
-                        &program,
-                        notifications::window_here().as_deref(),
-                        &self.systemctl,
-                    )
-                })
-                .map(|started| {
-                    Some(match started {
-                        notifications::Started::Now => format!(
-                            "Helix Toolbox now checks {}, and soon after you log in, and shows a notification when updates are waiting. It never updates anything itself.\n\nThe same setting turns it off again.",
-                            notifications::EVERY
-                        ),
-                        notifications::Started::AtLogin => "The checks are set up, but systemd's user manager did not answer, so they start at your next login.".to_string(),
-                    })
-                })
-        };
-        match told {
-            Ok(None) => {}
-            Ok(Some(text)) => {
-                self.popup = Some(Popup::Text(TextPopup::new(
-                    "Update notifications",
-                    text,
-                    true,
-                )));
-            }
-            Err(error) => {
-                self.popup = Some(Popup::Text(TextPopup::new(
-                    "Update notifications",
-                    format!("They could not be turned on or off: {error}"),
-                    true,
-                )));
-            }
+        let before = watch::read(&places, Some(&path));
+        let mut chosen = before.clone();
+        how(&mut chosen);
+        if chosen == before {
+            return;
         }
+        let applied = std::env::current_exe()
+            .map_err(|error| format!("cannot tell where this program is: {error}"))
+            .and_then(|program| {
+                watch::apply(
+                    &places,
+                    &path,
+                    &chosen,
+                    &program,
+                    notifications::window_here().as_deref(),
+                    &self.systemctl,
+                )
+            });
+        let turned_on = (chosen.updates && !before.updates)
+            || (chosen.health && !before.health)
+            || (chosen.drift.is_some() && chosen.drift != before.drift);
+        let what: Vec<String> = [
+            chosen.updates.then(|| "updates are waiting".to_string()),
+            chosen
+                .health
+                .then(|| "Helix Doctor finds a new problem".to_string()),
+            chosen
+                .drift
+                .as_ref()
+                .map(|slug| format!("the machine changes since the baseline {slug}")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let text = match applied {
+            Err(error) => format!("They could not be turned on or off: {error}"),
+            Ok(Some(notifications::Started::AtLogin)) => "The checks are set up, but systemd's user manager did not answer, so they start at your next login.".to_string(),
+            Ok(_) if !turned_on => return,
+            Ok(_) => format!(
+                "Helix Toolbox now checks {}, and soon after you log in, and shows a notification when {}. It never updates, repairs or puts back anything itself.\n\nThe same settings turn it off again.",
+                notifications::EVERY,
+                what.join(", or when ")
+            ),
+        };
+        self.popup = Some(Popup::Text(TextPopup::new("Notifications", text, true)));
     }
 
     // ----- Profiles -----
@@ -6826,7 +6886,7 @@ mod tests {
         app.reports_dir = Some(directory.path().to_path_buf());
         app.open_screen(Screen::Settings);
         app.focus = Focus::Main;
-        app.main_state.select(Some(8));
+        app.main_state.select(Some(10));
         assert!(screen(&mut app, 120, 40).contains("Bug report, to paste into an issue"));
         press(&mut app, KeyCode::Enter);
         assert!(screen(&mut app, 120, 40).contains("Gathering the report"));
@@ -7588,17 +7648,51 @@ mod tests {
             told: directory.path().join("notified.txt"),
         };
         app.notices = Some(places.clone());
+        app.settings_path = Some(directory.path().join("settings.toml"));
         app.systemctl = |_| Some(true);
         press(&mut app, KeyCode::Enter);
         assert!(notifications::is_on(&places));
         assert!(screen(&mut app, 120, 40).contains("Helix Toolbox now checks"));
         press(&mut app, KeyCode::Esc);
         assert!(screen(&mut app, 120, 40).contains("yes, every 6 hours"));
+        // Health problems too, then updates off: the timer stays for them.
+        app.main_state.select(Some(7));
+        press(&mut app, KeyCode::Enter);
+        assert!(screen(&mut app, 120, 40).contains("Helix Doctor finds a new problem"));
+        press(&mut app, KeyCode::Esc);
+        app.main_state.select(Some(6));
+        press(&mut app, KeyCode::Enter);
+        assert!(app.popup.is_none());
+        assert!(notifications::is_on(&places));
+        let watched = watch::read(&places, app.settings_path.as_deref());
+        assert!(watched.health && !watched.updates);
+        // Drift: no baseline saved yet, so nothing to choose.
+        let baselines = tempfile::tempdir().unwrap();
+        app.baselines_dir = Some(baselines.path().to_path_buf());
+        assert!(screen(&mut app, 120, 40).contains("no (save one in Drift)"));
+        std::fs::write(
+            baselines.path().join("fresh.toml"),
+            "name = \"Fresh\"\nsystem = \"Garuda Linux\"\ncreated = 1\n",
+        )
+        .unwrap();
+        app.main_state.select(Some(8));
+        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::Esc);
+        assert!(screen(&mut app, 120, 40).contains("from fresh"));
+        press(&mut app, KeyCode::Enter);
+        assert!(
+            watch::read(&places, app.settings_path.as_deref())
+                .drift
+                .is_none()
+        );
+        // Everything off removes the timer.
+        app.main_state.select(Some(7));
         press(&mut app, KeyCode::Enter);
         assert!(!notifications::is_on(&places));
         assert!(app.popup.is_none());
         // Without systemd it says so, and nothing is written.
         app.systemctl = |_| None;
+        app.main_state.select(Some(6));
         press(&mut app, KeyCode::Enter);
         assert!(screen(&mut app, 120, 40).contains("could not be turned on"));
         assert!(!places.units.join(notifications::TIMER).exists());

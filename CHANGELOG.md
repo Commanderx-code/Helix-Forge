@@ -16,6 +16,14 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   checked, never passed. `c` in the terminal interface, **Check it now**
   in the window and `helix-toolbox verify <entry>` check an entry at any
   time. The VM tests run the same checks after each of their cases.
+- **Told when the machine changes.** The notifications' timer can also
+  tell you when Helix Doctor finds a new problem, and when the machine
+  differs from a saved Drift baseline in a new way, each told once:
+  **Tell me of new health problems** and **Tell me when it drifts from a
+  baseline** in Settings, in the window and the terminal interface, or
+  `helix-toolbox notifications health on` and `notifications drift
+  <baseline>`. A click opens the window on Helix Doctor or Drift. Nothing
+  is repaired or put back by itself.
 
 ## v1.15.0
 

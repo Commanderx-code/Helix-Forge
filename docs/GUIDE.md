@@ -170,6 +170,13 @@ updates** button opens the window on Updates. It never updates anything
 itself. `helix-toolbox notifications off`, or the same setting, removes the
 timer.
 
+The same check can also tell you when Helix Doctor finds a new problem
+(**Tell me of new health problems**, `helix-toolbox notifications health
+on`) or when the machine has changed since a saved Drift baseline (**Tell me
+when it drifts from a baseline**, `helix-toolbox notifications drift
+<baseline>`). Each problem or change is told once, and nothing is repaired
+or put back by itself.
+
 ## The desktop
 
 **Desktop** shows the desktop and its login screen, the theme, icons,
