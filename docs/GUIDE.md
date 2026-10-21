@@ -97,8 +97,9 @@ depend on first. Profiles lists the built-in ones. To make your own, queue
 what a machine needs (applications, the Myfish shell, dotfiles
 configurations, tweaks) and press `s` on the Install Plan to name it. It is
 saved in `~/.config/helix-toolbox/profiles/` and appears under Profiles, **Your
-profiles**. `helix-toolbox profile export` and `import` move it to another
-machine.
+profiles**. There `x` exports it to a file to take to another machine, where
+`o` in Profiles imports it, and `Delete` deletes it. `helix-toolbox profile
+export` and `import` do the same on the command line.
 
 ## How far to trust an entry
 
@@ -188,8 +189,8 @@ them; with everything in the bundle, nothing is downloaded. A Flatpak
 installed on the first machine goes in too, with its runtimes, once its
 remote has a collection ID (`bundle create` says how to give Flathub its
 own). Entries that need the network are named so you can run them later.
-In the window, **Offline bundles** does the same: it bundles the Install
-Plan's entries, and checks and installs a bundle from its folder.
+In the menu and the window, **Offline bundles** does the same: it bundles the
+Install Plan's entries, and checks and installs a bundle from its folder.
 
 ## When something is wrong
 
