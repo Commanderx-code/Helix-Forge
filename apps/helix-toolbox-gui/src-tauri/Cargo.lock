@@ -1278,6 +1278,7 @@ name = "helix-toolbox-gui"
 version = "1.12.0"
 dependencies = [
  "base64 0.22.1",
+ "gtk",
  "helix-toolbox-catalog",
  "helix-toolbox-core",
  "helix-toolbox-engine",

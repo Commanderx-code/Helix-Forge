@@ -39,6 +39,8 @@ tauri = { version = "2.11", features = [] }
 # The file chooser for importing and exporting profiles, used from the Rust
 # side only.
 tauri-plugin-dialog = "2.8.1"
+# The clipboard, for the bug report: the GTK that Tauri already uses.
+gtk = "0.18"
 
 [dev-dependencies]
 tempfile = "3"

@@ -70,6 +70,8 @@ class Toolbox {
   /** Something to read, such as a result or an inspection. */
   notice = $state<{ title: string; text: string; mono?: boolean } | null>(null);
   prompt = $state<Prompt | null>(null);
+  /** The bug report being shown: its text once gathered, or what went wrong. */
+  report = $state<{ text: string | null; problem: string | null } | null>(null);
   /** The setup wizard is open; on the first start it opens by itself. */
   wizard = $state(false);
   /** The command palette (Ctrl-K) is open. */
@@ -232,6 +234,17 @@ class Toolbox {
     } catch (error) {
       this.notice = { title, text: String(error) };
       return false;
+    }
+  }
+
+  /** Gather a bug report and show it, to copy into an issue. */
+  async makeReport() {
+    this.report = { text: null, problem: null };
+    try {
+      const text = await api.bugReport();
+      if (this.report) this.report = { text, problem: null };
+    } catch (error) {
+      if (this.report) this.report = { text: null, problem: String(error) };
     }
   }
 

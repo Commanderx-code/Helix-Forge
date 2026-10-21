@@ -15,6 +15,10 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   **Export…**, to write it to a file, and **Delete…**; **Import a
   profile…** in the Profiles area adds one from a file, checked against
   the catalog. The files are chosen in the desktop's own file chooser.
+- **A bug report from the window.** **Make a bug report…** in Settings,
+  or in the palette, shows what `helix-toolbox report` says, with the
+  window's version, how it was installed, WebKitGTK, the desktop and the
+  theme, and copies it to paste into an issue.
 
 ## v1.12.0
 

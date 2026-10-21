@@ -531,6 +531,95 @@ fn delete_profile(gui: State<Gui>, id: String) -> Result<String, String> {
     Ok(format!("{} is deleted.", printable(&profile.name)))
 }
 
+// Reporting a problem
+
+/// How the window was installed, from where it runs, as the command line's
+/// report says it of itself.
+fn window_installed_from(exe: &Path) -> &'static str {
+    if std::env::var_os("APPIMAGE").is_some() {
+        "AppImage"
+    } else if exe.starts_with("/usr/bin") || exe.starts_with("/usr/sbin") {
+        "package"
+    } else if exe.components().any(|part| part.as_os_str() == "target") {
+        "source build"
+    } else {
+        "other"
+    }
+}
+
+/// What a bug report needs, to paste into an issue: `helix-toolbox report`,
+/// then the window's own facts. It only reads, and shows the home folder
+/// as `~`.
+#[tauri::command]
+async fn bug_report(app: AppHandle) -> Result<String, String> {
+    blocking(app, |gui| {
+        if !gui.this.is_absolute() {
+            return Err(
+                "The helix-toolbox command was not found beside this program or on the PATH; the report comes from it."
+                    .to_string(),
+            );
+        }
+        let output = std::process::Command::new(&gui.this)
+            .arg("report")
+            .output()
+            .map_err(|error| format!("{} report could not run: {error}", gui.this.display()))?;
+        if !output.status.success() {
+            return Err(format!(
+                "{} report failed: {}",
+                gui.this.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        let variable = |name: &str| {
+            std::env::var(name)
+                .ok()
+                .filter(|value| !value.is_empty())
+                .map(|value| printable(&value))
+                .unwrap_or_else(|| "unknown".to_string())
+        };
+        let exe = std::env::current_exe().unwrap_or_default();
+        let theme = serde_json::to_value(theme(gui))
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_string))
+            .unwrap_or_default();
+        let window = format!(
+            "\n### The window\n\n- Helix Toolbox window: {}\n- Installed from: {}\n- WebKitGTK: {}\n- Desktop: {}, {} session\n- Theme: {theme}\n",
+            env!("CARGO_PKG_VERSION"),
+            window_installed_from(&exe),
+            tauri::webview_version().unwrap_or_else(|_| "unknown".to_string()),
+            variable("XDG_CURRENT_DESKTOP"),
+            variable("XDG_SESSION_TYPE"),
+        );
+        Ok(without_home(&format!(
+            "{}{window}",
+            String::from_utf8_lossy(&output.stdout).trim_end()
+        )))
+    })
+    .await?
+}
+
+/// Put text on the desktop's clipboard, through GTK on the window's thread:
+/// a page may write there only from a real click.
+#[tauri::command]
+fn copy_text(app: AppHandle, text: String) -> Result<(), String> {
+    app.run_on_main_thread(move || {
+        gtk::Clipboard::get(&gtk::gdk::SELECTION_CLIPBOARD).set_text(&text);
+    })
+    .map_err(|error| error.to_string())
+}
+
+/// The home folder as `~`, as in the command line's report.
+fn without_home(text: &str) -> String {
+    match std::env::var("HOME")
+        .ok()
+        .map(|home| home.trim_end_matches('/').to_string())
+        .filter(|home| home.len() > 1)
+    {
+        Some(home) => text.replace(&home, "~"),
+        None => text.to_string(),
+    }
+}
+
 // Doctor
 
 /// The health checks, run on this machine.
@@ -1517,7 +1606,7 @@ fn main() {
                 about, areas, statuses, favorites, pin, prepare, changes, download_sources, cancel,
                 run, write, resize,
                 stop, close_run, runs, save_profile, import_profile, export_profile,
-                delete_profile, doctor, prepare_repair, updates,
+                delete_profile, bug_report, copy_text, doctor, prepare_repair, updates,
                 prepare_channels, prepare_update, prepare_remove, list_backups, prepare_restore, drift_targets,
                 drift_check, save_baseline, reliability, trust, read_hardware, prepare_firmware,
                 prepare_smart, read_desktop, save_look, prepare_look, read_settings,
@@ -1581,6 +1670,38 @@ mod tests {
                 "{id}: {refused}"
             );
         }
+    }
+
+    #[test]
+    fn the_report_says_how_the_window_was_installed() {
+        if std::env::var_os("APPIMAGE").is_some() {
+            return;
+        }
+        assert_eq!(
+            window_installed_from(Path::new("/usr/bin/helix-toolbox-gui")),
+            "package"
+        );
+        assert_eq!(
+            window_installed_from(Path::new(
+                "/src/apps/helix-toolbox-gui/src-tauri/target/debug/helix-toolbox-gui"
+            )),
+            "source build"
+        );
+        assert_eq!(
+            window_installed_from(Path::new("/opt/helix/helix-toolbox-gui")),
+            "other"
+        );
+    }
+
+    #[test]
+    fn the_report_shows_the_home_folder_as_a_tilde() {
+        let Some(home) = std::env::var("HOME").ok().filter(|home| home.len() > 1) else {
+            return;
+        };
+        let said = without_home(&format!(
+            "- Settings: {home}/.config/helix-toolbox/settings.toml"
+        ));
+        assert_eq!(said, "- Settings: ~/.config/helix-toolbox/settings.toml");
     }
 
     #[test]

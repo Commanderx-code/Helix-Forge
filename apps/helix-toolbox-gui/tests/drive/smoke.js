@@ -314,6 +314,23 @@
     return `${title.textContent.trim()}: installed, but not by a package Helix Toolbox knows`;
   });
 
+  await step('a bug report is gathered from the command line and copied', async () => {
+    await click('Settings', document.querySelector('nav'));
+    await until('Settings', () => screenTitle().startsWith('Settings'));
+    await click('Make a bug report');
+    const dialog = await until('the report', () => document.querySelector('#report-title')?.closest('[role="dialog"]'));
+    const text = await until('the report text', () => dialog.querySelector('pre')?.textContent || dialog.querySelector('[role="alert"]')?.textContent, 30000);
+    if (!text.includes("the smoke test's stand-in")) throw new Error(text);
+    if (!text.includes('### The window') || !text.includes('Helix Toolbox window:')) throw new Error(`no window section: ${text}`);
+    if (!text.includes('- Settings: ~/.config/')) throw new Error(`the home folder is not shown as ~: ${text}`);
+    await accessible('the bug report');
+    await click('Copy', dialog);
+    await until('copied', () => withText('[role="status"]', 'Copied'));
+    await click('Close', dialog);
+    await until('the report to close', () => !document.querySelector('#report-title'));
+    return text.split('\n').find((line) => line.startsWith('- WebKitGTK')) ?? 'gathered and copied';
+  });
+
   await trace(window.axe ? `axe-core ${window.axe.version} checked the screens` : 'axe-core was not loaded; nothing was checked for accessibility');
   await trace(failed ? 'DONE with failures' : 'DONE');
   await sleep(300);
