@@ -4,6 +4,16 @@ Each release is tagged `vMAJOR.MINOR.PATCH` on GitHub, with the program, its
 packages and their checksums. A release whose workflow only adopted updated
 dotfiles or Myfish sources raises the patch number and is not listed here.
 
+## v1.15.0
+
+- **The terminal interface catches up with the window.** It has an
+  **Offline bundles** screen, which bundles the Install Plan's entries
+  into a folder and checks or installs a bundle from one. In Profiles,
+  `x` exports one of your profiles to a file, `Delete` deletes it and
+  `o` imports one. Settings makes a **bug report**, shown to read and
+  kept in `~/.local/state/helix-toolbox/bug-report.md` to paste into an
+  issue.
+
 ## v1.14.0
 
 - **Told when updates are waiting.** **Tell me when updates are waiting**

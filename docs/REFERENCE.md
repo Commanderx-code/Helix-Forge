@@ -152,6 +152,9 @@ entries) and press `s` on the Install Plan to save it under a name. It is a
 TOML file in `~/.config/helix-toolbox/profiles/` and appears under Profiles,
 **Your profiles**, where `Enter` runs it and `Space` queues it, like the
 built-in ones; its entries run in order, after what they depend on.
+In the menu's Profiles area, `x` on one of your profiles exports it to a
+file, `Delete` deletes it (after you type yes) and `o` imports a profile
+file; the window has the same as buttons. On the command line:
 `helix-toolbox profile list`, `export <name> [file]`, `import <file>` (which
 refuses a profile naming entries this catalog does not have) and `delete
 <name>`; `helix-toolbox run profile-<name>` runs one.
@@ -280,6 +283,12 @@ a collection ID is given the bundle's when it is the one published for the
 remote's address (Flathub's); any other, and a remote this machine lacks,
 which is added with the bundle's copy of its key, only with
 `--trust-bundle`, since nothing here vouches for them.
+
+**Offline bundles** in the menu and the window does the same from the
+Install Plan: it says what a bundle of the queued entries would download,
+makes one in a folder you name (with every dependency or only what this
+machine lacks), and checks a bundle's folder or installs from it, with the
+bundle's word taken only when you switch that on.
 
 ## What a change will do
 

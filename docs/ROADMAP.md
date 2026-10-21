@@ -52,6 +52,11 @@ The items:
     replaces a copy the user keeps outside any package tool, and the
     window's AppImage.
 
+## v1.15.0: both interfaces alike
+
+- [x] The terminal interface's Offline bundles screen, profile export,
+      import and delete, and bug report, as the window has them
+
 ## v1.14.0: told when updates wait
 
 - [x] A desktop notification when updates are waiting, from a systemd user
