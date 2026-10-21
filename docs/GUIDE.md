@@ -110,7 +110,9 @@ stand-in commands), **VM Tested** or **Hardware Tested** (reported from a
 virtual or real machine), or **Not Yet Validated**. Entries that could stop a
 machine booting, logging in or showing a display come first, marked `!`;
 those are the ones to have a snapshot or a live USB ready for. If you run
-one successfully, reporting it helps everyone ([REPORTING.md](REPORTING.md)).
+one successfully, reporting it helps everyone: `w` on the entry, or on its
+run in History, opens the report, and `o` there opens the issue in your
+browser, filled in ([REPORTING.md](REPORTING.md)).
 
 `v` on an entry opens the **trust inspector**: where its installer comes
 from, its checksum and license, what checks the packages it installs (pacman

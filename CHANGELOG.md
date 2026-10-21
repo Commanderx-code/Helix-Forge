@@ -13,6 +13,15 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   `o` imports one. Settings makes a **bug report**, shown to read and
   kept in `~/.local/state/helix-toolbox/bug-report.md` to paste into an
   issue.
+- **It worked on my machine.** Graphics drivers, firmware, login screens
+  and the Steam Deck can only be tested on real hardware, so a run that
+  worked can now be reported in a few steps: **Report it worked…** on a run
+  in the window's History or an entry in Reliability, `w` in the same places
+  in the terminal interface, or `helix-toolbox report --worked <entry>`. The
+  report names the distribution, desktop, model and graphics with their
+  drivers (no serial numbers, host name or user) and opens a new issue form
+  filled in; once checked, it becomes the entry's **Hardware Tested**
+  record. It is refused for a run that failed and in a virtual machine.
 
 ## v1.14.0
 

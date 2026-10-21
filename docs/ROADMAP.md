@@ -56,6 +56,10 @@ The items:
 
 - [x] The terminal interface's Offline bundles screen, profile export,
       import and delete, and bug report, as the window has them
+- [x] Hardware reports: a run that worked written up from the history, with
+      the machine's model and graphics, as an issue form filled in, and
+      `scripts/accept-hardware-report.py` to add it to
+      `catalog/validation.toml`
 
 ## v1.14.0: told when updates wait
 
@@ -165,7 +169,8 @@ The items:
       stand-in, a USB stick and disks that take TRIM
 - [x] Every GRUB theme and both Plymouth theme entries in the virtual
       machines (v1.5.3)
-- [ ] Hardware reports: the NVIDIA entries and a real Steam Deck
+- [ ] Hardware reports: the NVIDIA entries and a real Steam Deck (they can be
+      sent from Helix Toolbox since v1.15.0)
 
 ## v1.1.0: configuration drift and the command palette (done)
 

@@ -20,7 +20,7 @@ use helix_toolbox_core::{Action, Entry, Item};
 use helix_toolbox_engine::{
     EngineError, Plan, backups, bundle,
     confirmation::{self, Prepared},
-    doctor, drift, history,
+    doctor, drift, hardware_report, history,
     inventory::{Inventory, Status, which},
     notifications,
     overview::Overview,
@@ -97,6 +97,7 @@ History, Backups, Doctor, Hardware, Desktop, Updates, Drift, Reliability, Settin
   Desktop: s        save the look; Enter puts a saved one back      Settings: wizard, bug report
   Drift: b          compare with another         s   save this machine; Space / a plan what is missing
   Reliability: i    critical or untested only    v   where the entry comes from
+  History, Reliability: w  report that it worked here, for a Hardware Tested record
 
 Running window
   Ctrl-C            stop; again, kill what is left  Enter / q   close when finished
@@ -156,6 +157,8 @@ enum Popup {
     LookName(InputPopup),
     /// A path or a word, and what it answers.
     Ask(InputPopup, Asked),
+    /// A hardware report to read, and the issue it fills in.
+    HardwareReport(TextPopup, String),
 }
 
 /// What an `Ask` popup's answer is for.
@@ -537,6 +540,11 @@ pub struct App {
     reporting: Option<mpsc::Receiver<String>>,
     /// Where the bug report is saved; none in tests unless one says.
     reports_dir: Option<PathBuf>,
+    /// Opens a link in the browser; tests answer for it.
+    opener: fn(&str) -> Result<(), String>,
+    /// The machine a hardware report names, in tests; read each time
+    /// otherwise.
+    machine: Option<hardware_report::Machine>,
 }
 
 /// A plan of the queue as it was, from when it was made, with what the
@@ -632,6 +640,8 @@ impl App {
             bundle_due: None,
             reporting: None,
             reports_dir: None,
+            opener: |_| Err("there is no browser here".to_string()),
+            machine: None,
         };
         app.update_rows();
         if !args.bypass_root && nix::unistd::Uid::effective().is_root() {
@@ -673,6 +683,7 @@ impl App {
         self.notices = notifications::Places::here();
         self.systemctl = notifications::systemctl;
         self.reports_dir = history::state_dir();
+        self.opener = open_link;
         self
     }
 
@@ -1146,7 +1157,9 @@ impl App {
             Screen::Settings => self.draw_settings(frame, main),
         }
         match &mut self.popup {
-            Some(Popup::Text(popup)) => popup.draw(frame, centered(main, 95, 95), self.theme),
+            Some(Popup::Text(popup) | Popup::HardwareReport(popup, _)) => {
+                popup.draw(frame, centered(main, 95, 95), self.theme)
+            }
             Some(
                 Popup::ProfileName(popup)
                 | Popup::BaselineName(popup)
@@ -2295,6 +2308,11 @@ impl App {
     fn hints(&self) -> (&'static str, Vec<Hint>) {
         match &self.popup {
             Some(Popup::Text(popup)) => return popup.hints(),
+            Some(Popup::HardwareReport(popup, _)) => {
+                let (title, mut list) = popup.hints();
+                list.insert(0, Hint::new(&["o"], "Open the issue"));
+                return (title, list);
+            }
             Some(
                 Popup::ProfileName(popup)
                 | Popup::BaselineName(popup)
@@ -2373,6 +2391,14 @@ impl App {
                 }
                 Screen::History => {
                     list.push(Hint::new(&["Enter"], "Show log"));
+                    if self
+                        .main_state
+                        .selected()
+                        .and_then(|index| self.records.get(index))
+                        .is_some_and(|record| record.success)
+                    {
+                        list.push(Hint::new(&["w"], "Report it worked"));
+                    }
                     list.push(Hint::new(&["r"], "Reload"));
                 }
                 Screen::Doctor => {
@@ -2454,9 +2480,16 @@ impl App {
                 }
                 Screen::Reliability => {
                     list.push(Hint::new(&["↑↓"], "Navigate"));
-                    if !self.reliability_rows.is_empty() {
+                    if let Some((_, _, assessment)) = self
+                        .main_state
+                        .selected()
+                        .and_then(|index| self.reliability_rows.get(index))
+                    {
                         list.push(Hint::new(&["Enter"], "Details"));
                         list.push(Hint::new(&["v"], "Trust"));
+                        if assessment.here.is_some() {
+                            list.push(Hint::new(&["w"], "Report it worked"));
+                        }
                     }
                     list.push(Hint::new(
                         &["i"],
@@ -2510,6 +2543,20 @@ impl App {
         match &mut self.popup {
             Some(Popup::Text(popup)) => {
                 if popup.handle_key(key) {
+                    self.popup = None;
+                }
+                return true;
+            }
+            Some(Popup::HardwareReport(popup, url)) => {
+                if matches!(key.code, KeyCode::Char('o') | KeyCode::Char('O')) {
+                    let text = match (self.opener)(url) {
+                        Ok(()) => "The issue is open in your browser, filled in from the report. Say there what you checked, then submit it.".to_string(),
+                        Err(error) => format!(
+                            "It could not be opened: {error}\n\nThe link is in ~/.local/state/helix-toolbox/hardware-report.md, or helix-toolbox report --worked prints it."
+                        ),
+                    };
+                    self.popup = Some(Popup::Text(TextPopup::new("Hardware report", text, true)));
+                } else if popup.handle_key(key) {
                     self.popup = None;
                 }
                 return true;
@@ -2931,6 +2978,16 @@ impl App {
             },
             Screen::History => match key.code {
                 KeyCode::Enter => self.show_log(),
+                KeyCode::Char('w') => {
+                    if let Some(record) = self
+                        .main_state
+                        .selected()
+                        .and_then(|index| self.records.get(index))
+                        .cloned()
+                    {
+                        self.report_worked(&record, None);
+                    }
+                }
                 KeyCode::Char('r') => self.reload_history(),
                 KeyCode::Char('h') | KeyCode::Left => self.focus = Focus::Sidebar,
                 _ => {}
@@ -3066,6 +3123,27 @@ impl App {
                     self.coverage = self.coverage.next();
                     self.main_state.select(Some(0));
                     self.reload_reliability();
+                }
+                KeyCode::Char('w') => {
+                    if let Some((id, name, _)) = self
+                        .main_state
+                        .selected()
+                        .and_then(|index| self.reliability_rows.get(index))
+                        .cloned()
+                    {
+                        match hardware_report::last_success(&self.run_history(), &id).cloned() {
+                            Some(record) => self.report_worked(&record, Some(&id)),
+                            None => {
+                                self.popup = Some(Popup::Text(TextPopup::new(
+                                    "Not run here",
+                                    format!(
+                                        "A hardware report comes from a run that worked on this machine, and {name} has no successful run in this machine's history."
+                                    ),
+                                    true,
+                                )))
+                            }
+                        }
+                    }
                 }
                 KeyCode::Char('h') | KeyCode::Left => self.focus = Focus::Sidebar,
                 _ => {}
@@ -5014,6 +5092,11 @@ impl App {
                 text.push_str(&format!("  {line}\n"));
             }
         }
+        if assessment.here.is_some() && assessment.level != reliability::Level::HardwareTested {
+            text.push_str(
+                "\nIt ran here: w reports that it worked, so that it can become Hardware Tested.\n",
+            );
+        }
         text.push_str(&format!(
             "\nv shows where {id} comes from and what checks it."
         ));
@@ -5514,6 +5597,52 @@ impl App {
         if matches!(self.popup, None | Some(Popup::Text(_))) {
             self.popup = Some(Popup::Text(TextPopup::new("Bug report", text, true)));
         }
+    }
+
+    // ----- Hardware reports -----
+
+    /// A report that a run worked on this machine, to read, then send as an
+    /// issue from the browser.
+    fn report_worked(&mut self, record: &history::Record, only: Option<&str>) {
+        let machine = match (&self.machine, self.examine_here) {
+            (Some(machine), _) => machine.clone(),
+            (None, true) => hardware_report::machine(
+                &doctor::Here,
+                &self.platform,
+                &crate::setup::desktop_here(),
+            ),
+            (None, false) => hardware_report::Machine::default(),
+        };
+        let report = match hardware_report::prepare(record, only, machine, crate::VERSION, "") {
+            Ok(report) => report,
+            Err(why) => {
+                self.popup = Some(Popup::Text(TextPopup::new("No hardware report", why, true)));
+                return;
+            }
+        };
+        let url = report.issue_url();
+        let text = report.text();
+        if let Some(directory) = &self.reports_dir {
+            let kept = std::fs::create_dir_all(directory).and_then(|()| {
+                std::fs::write(
+                    directory.join("hardware-report.md"),
+                    format!("{text}\nThe issue, filled in:\n\n{url}\n"),
+                )
+            });
+            if let Err(error) = kept {
+                tracing::warn!(%error, "the hardware report was not saved");
+            }
+        }
+        self.popup = Some(Popup::HardwareReport(
+            TextPopup::new(
+                "Hardware report",
+                format!(
+                    "{text}\no opens the issue in your browser, filled in; GitHub asks you to sign in, and the form asks what you checked. Nothing is sent until you submit it there."
+                ),
+                true,
+            ),
+            url,
+        ));
     }
 
     // ----- Offline bundles -----
@@ -6158,6 +6287,21 @@ fn hardware_rows(found: &helix_toolbox_engine::hardware::Hardware) -> Vec<Hardwa
 /// Whether queueing a difference's entry would put back what it names.
 fn restorable(kind: drift::Kind) -> bool {
     !matches!(kind, drift::Kind::Added | drift::Kind::Version)
+}
+
+/// Open a link in the desktop's browser, without waiting for it.
+fn open_link(url: &str) -> Result<(), String> {
+    std::process::Command::new("xdg-open")
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|mut child| {
+            // Reaped when it exits, so that it leaves nothing behind.
+            std::thread::spawn(move || child.wait());
+        })
+        .map_err(|error| format!("xdg-open could not run: {error}"))
 }
 
 /// One of the user's own profiles, which can be exported and deleted.
@@ -7229,6 +7373,94 @@ mod tests {
         assert!(text.contains("exit 1"));
         press(&mut app, KeyCode::Enter);
         assert!(screen(&mut app, 120, 40).contains("No log was saved"));
+    }
+
+    #[test]
+    fn a_run_that_worked_becomes_a_hardware_report_to_send() {
+        let state = tempfile::tempdir().unwrap();
+        let reports = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.reports_dir = Some(reports.path().to_path_buf());
+        app.machine = Some(hardware_report::Machine {
+            distribution: "Garuda Linux".into(),
+            model: Some("Lenovo ThinkPad T15p Gen 2i".into()),
+            graphics: vec!["NVIDIA GeForce GTX 1650 Mobile / Max-Q (nvidia)".into()],
+            architecture: "x86_64".into(),
+            ..Default::default()
+        });
+        history::record_in(
+            state.path(),
+            &[("git".into(), "Git".into())],
+            false,
+            "exit 1",
+            None,
+        )
+        .unwrap();
+        history::record_in(
+            state.path(),
+            &[("git".into(), "Git".into()), ("meld".into(), "Meld".into())],
+            true,
+            "exit status 0",
+            None,
+        )
+        .unwrap();
+        app.records = history::read_in(state.path(), 10).unwrap();
+        app.open_screen(Screen::History);
+        app.records = history::read_in(state.path(), 10).unwrap();
+        app.focus = Focus::Main;
+        let successful = app
+            .records
+            .iter()
+            .position(|record| record.success)
+            .unwrap();
+        app.main_state.select(Some(1 - successful));
+        assert!(!screen(&mut app, 140, 40).contains("Report it worked"));
+        press(&mut app, KeyCode::Char('w'));
+        assert!(screen(&mut app, 140, 40).contains("No hardware report"));
+        press(&mut app, KeyCode::Esc);
+
+        app.main_state.select(Some(successful));
+        assert!(screen(&mut app, 140, 40).contains("w Report it worked"));
+        press(&mut app, KeyCode::Char('w'));
+        let shown = screen(&mut app, 140, 40);
+        assert!(shown.contains("[[hardware]]"), "{shown}");
+        assert!(shown.contains("o Open the issue"), "{shown}");
+        let Some(Popup::HardwareReport(_, url)) = &app.popup else {
+            panic!("no hardware report");
+        };
+        assert!(url.starts_with(hardware_report::ISSUES));
+        assert!(
+            url.contains("entry%20%3D%20%22meld%22"),
+            "both entries: {url}"
+        );
+        let saved = std::fs::read_to_string(reports.path().join("hardware-report.md")).unwrap();
+        assert!(saved.contains(url.as_str()));
+        app.opener = |url| {
+            if url.starts_with(hardware_report::ISSUES) {
+                Ok(())
+            } else {
+                Err("not the issue".into())
+            }
+        };
+        press(&mut app, KeyCode::Char('o'));
+        assert!(screen(&mut app, 140, 40).contains("open in your browser"));
+        press(&mut app, KeyCode::Esc);
+
+        // From Reliability, one entry's.
+        app.open_screen(Screen::Reliability);
+        app.focus = Focus::Main;
+        let row = app
+            .reliability_rows
+            .iter()
+            .position(|(id, _, _)| id == "meld")
+            .unwrap();
+        app.main_state.select(Some(row));
+        assert!(screen(&mut app, 140, 40).contains("w Report it worked"));
+        press(&mut app, KeyCode::Char('w'));
+        let Some(Popup::HardwareReport(_, url)) = &app.popup else {
+            panic!("no hardware report");
+        };
+        assert!(url.contains("entry%20%3D%20%22meld%22") && !url.contains("%22git%22"));
     }
 
     #[test]
