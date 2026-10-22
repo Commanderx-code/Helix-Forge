@@ -6,6 +6,14 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
 
 ## v1.21.1
 
+- **Offline bundles check what they install.** An RPM in a bundle must
+  carry a signature by a key in the installing machine's rpm keyring,
+  checked when the plan is made and again on the copy about to install, and
+  dnf checks local packages too; `rpm -K` alone had passed a package with
+  no signature at all. A bundle's `packages` folder may hold only its
+  family's package files, and every Debian package apt is handed must be in
+  the machine's signed repository index, where a file not named `.deb` had
+  gone to apt unchecked. Either is refused unless `--trust-bundle` is given.
 - **Passwords off the command line and the screen.** The file encryption
   tool hands its password to OpenSSL on a descriptor, not its command line
   where other local users could read it, asks for it without showing it and
