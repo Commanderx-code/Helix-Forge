@@ -23,6 +23,11 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   family's package; one it lacks (a Debian package Ubuntu 22.04 does not
   carry) is left out with a note, and the next source is used, or the plan
   says the entry cannot run here.
+- **Ubuntu 22.04 gets the newer terminal tools too.** eza, delta, Fastfetch,
+  procs, broot, dust, bottom and tealdeer fall back to their own releases
+  where the distribution has no package, as on Ubuntu 22.04 and 24.04.
+- **The Terminal Power User profile** adds Lazygit, Yazi, Atuin and
+  Starship.
 
 ## v1.23.0
 

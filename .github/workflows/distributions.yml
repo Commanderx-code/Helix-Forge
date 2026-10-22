@@ -529,6 +529,14 @@ jobs:
           yes | bin/helix-toolbox remove uv --yes | tee release-removed.txt
           grep -q '^Verified: Remove uv: removed' release-removed.txt
           test ! -e "$HOME/.local/bin/uv"
+          # eza's Debian package is not in Ubuntu 22.04: the plan leaves it
+          # out for eza's release.
+          bin/helix-toolbox plan eza | tee eza-plan.txt
+          grep -q "^eza: eza is not in this machine's repositories; using the GitHub release (v0.23.5)$" eza-plan.txt
+          yes | bin/helix-toolbox run eza --yes | tee eza.txt
+          "$HOME/.local/bin/eza" --version
+          yes | bin/helix-toolbox remove eza --yes
+          test ! -e "$HOME/.local/bin/eza"
       - name: Update notifications, with stand-ins for systemd and the desktop
         run: |
           # No user systemd runs in a container (the openSUSE VM has one): a
