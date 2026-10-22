@@ -87,7 +87,6 @@ const HELP: &str = "Everywhere
   Ctrl-K            commands, by name            q / Ctrl-C  quit        Ctrl-R  check installed again
   j / k             move in the sidebar          Enter / l   open the screen or quick action
   Mouse             click to open or select, again for Enter; wheel scrolls; Shift-drag selects text
-
 Areas (Applications and the other catalog screens)
   Enter / l         open a group or run an entry o / x / Del  Profiles: import, export, delete
   h                 parent group, or the sidebar Space       add to or remove from the install plan
@@ -95,7 +94,6 @@ Areas (Applications and the other catalog screens)
   r / c             remove a package / check it  v           where it comes from (trust)
   u                 update the entry             U           update every entry with an update
   g                 flags guide     *   pin a favorite     i   show all, installed or updates
-
 Install Plan   Enter run it   x / Del remove one   K / J move   c clear   s save as profile   e changes
 History, Backups, Doctor, Hardware, Desktop, Updates, Drift, Reliability, Settings
   Enter             log / restore / details / change   r   reload or check again; f repair; u / U update
@@ -1939,6 +1937,10 @@ impl App {
             Screen::Settings => self.draw_settings(frame, main),
         }
         match &mut self.popup {
+            // The keys are wider than the screen beside the sidebar.
+            Some(Popup::Text(popup)) if popup.title() == "Keys" => {
+                popup.draw(frame, centered(area, 96, 96), self.theme)
+            }
             Some(Popup::Text(popup) | Popup::HardwareReport(popup, _)) => {
                 popup.draw(frame, centered(main, 95, 95), self.theme)
             }
