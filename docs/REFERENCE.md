@@ -11,9 +11,19 @@ sidebar move between Dashboard, Applications, Favorites, Install Plan, and the o
 areas, History and Settings; `Enter` or `l` opens the selected screen and
 `h` returns to the sidebar. In an area, `j`/`k` or the arrows move in the
 list, `Enter` opens a group or runs an entry, `Space` adds it to the install
-plan, `d` shows the description, `p` the script or command, `g` explains the
-flags column and `/` searches every area. The Install Plan shows what is
-queued with its risk and requirements; `Enter` runs it. Each run asks `[Y]`
+plan, `d` shows its details, `p` the script or command, `g` explains the
+flags column and `/` searches every area. A row shows the entry's
+description where it fits, a group what it holds and how many items, and
+a search result the area and group it is listed in; an entry marked `[>]`
+(a play icon with Nerd Font icons) runs on its own and cannot be queued.
+The details say where the entry is, its kind (package, script, command,
+Nix, built in or profile), whether it asks questions as it runs, where an
+installed package came from, what a profile runs in order and what each of
+its flags means. On a profile, `e` puts its entries in the Install Plan one
+by one, so the plan can be changed before it runs. The Install Plan shows
+what is queued with its risk and requirements, each entry with its status,
+flags, area, kind and step; `K` and `J` (or `Shift` with the arrows) move
+the selected one earlier or later, and `Enter` runs it. Each run asks `[Y]`
 first and then runs in a terminal inside the window, with each step beside
 it (waiting, running, done, failed with its exit status, or skipped), how
 many steps have ended, and the run's warnings and, at the end, its result
@@ -22,7 +32,19 @@ so; `Ctrl-C` stops it and everything it started (if something ignores that,
 the window says so and a second `Ctrl-C` kills it), `l` saves its output, and
 History lists every run.
 `?` shows all keys and `q` quits. The menu needs a terminal; the commands
-below also work without one.
+below also work without one. `helix-toolbox tui --screen <name>` opens it
+on a screen (`updates`, `doctor`, `drift`, `plan`, `restic` and the others,
+or an area's id such as `applications`); on the first start the setup
+wizard opens over it.
+
+As in the window, the sidebar counts pinned Favorites, queued Install Plan
+entries and entries with an update, and the header shows the version. The
+Dashboard counts the package entries installed, those with an update
+waiting, what is queued and what is pinned, above the System Overview, and
+its quick actions include **Set up this machine** (the setup wizard) and
+**Find anything** (the command palette). The footer's rule says how many
+package entries were checked, or that the check is running; `Ctrl-R`, or
+"check again what is installed" in the command palette, checks again.
 
 `Ctrl-K` opens the command palette from any screen: type part of what you
 want and `Enter` does it. It finds every screen (`open updates`), actions
@@ -73,8 +95,8 @@ downloaded to find out), **Managed** when the command comes from Nix (`Home
 Manager 1.4.7`, `Nix`, `NixOS`), or **Not installed**. When a package is
 installed but a Nix copy of its command comes first on the PATH, the status
 says so (`; Home Manager's 0.12.5 runs first`). The check runs in the
-background when the menu opens and after every run; `d` repeats it in the
-description.
+background when the menu opens, after every run and on `Ctrl-R`; `d`
+repeats it in the details.
 
 `u` updates the selected entry and `U` every entry with an update, after
 the same confirmation as a run: `flatpak update -y` for its installation, `apt-get

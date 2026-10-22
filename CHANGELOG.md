@@ -38,6 +38,21 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   - **Configs:** field changes collect in a draft that `c` checks, `s`
     saves once and `x` discards.
   - **Settings:** names its file.
+- **The window's counts, details and plan order in the terminal
+  interface.**
+  - The sidebar counts pinned favorites, queued entries and updates. The
+    header shows the version, and the Dashboard shows the same four counts
+    as the window, with **Set up this machine** and **Find anything** among
+    its quick actions.
+  - The footer says how the check of installed packages stands, and
+    `Ctrl-R`, or the command palette, checks again.
+  - Rows show descriptions, group counts, and where a search result is
+    listed. Entries that run on their own are marked. `d` shows an entry's
+    place, kind, source, what a profile runs and what each flag means.
+  - `e` puts a profile's entries in the Install Plan one by one. `K` and
+    `J` reorder the plan, whose rows now show each entry's status, flags,
+    area and kind.
+  - `helix-toolbox tui --screen <name>` opens on a screen.
 
 ## v1.20.1
 

@@ -33,6 +33,16 @@ pub fn run(catalog: Catalog, platform: LinuxInfo, args: TuiArgs) -> Result<()> {
     let app = App::new(catalog, platform, &args)
         .remembering(look, path, &args)
         .with_status_checks();
+    // Before the terminal is taken over, so a wrong name is said plainly.
+    let opens = match args.screen.as_deref() {
+        Some(name) => Some(app.screen_named(name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "there is no screen named {name}; --screen takes {}",
+                app.screen_names()
+            )
+        })?),
+        None => None,
+    };
     let mut terminal = ratatui::init();
     // The terminal stops reporting the mouse however the interface ends,
     // a panic included.
@@ -45,6 +55,10 @@ pub fn run(catalog: Catalog, platform: LinuxInfo, args: TuiArgs) -> Result<()> {
     let banner = banner::detect().and_then(|picker| banner::encode(&picker));
     let mut app = app.with_banner(banner);
     // The first time Helix Toolbox starts, it offers the setup wizard.
+    // The screen asked for, with the wizard over it on the first start.
+    if let Some(screen) = opens {
+        app.open_on(screen);
+    }
     if app.first_run() {
         app.open_wizard(true);
     }
