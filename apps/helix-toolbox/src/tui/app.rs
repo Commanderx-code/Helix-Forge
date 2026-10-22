@@ -26,6 +26,7 @@ use helix_toolbox_engine::{
     notifications,
     overview::Overview,
     performance, plan, plan_removal, preflight, profiles, recovery, reliability,
+    restic::{self, Restic},
     services::{self, Verb},
     storage, updates,
     watch::{self, Watch},
@@ -101,7 +102,8 @@ History, Backups, Doctor, Hardware, Desktop, Updates, Drift, Reliability, Settin
   Reliability: i    critical or untested only    v   trust;  w (and History)  report it worked here
   Services: s start/stop  e enable/disable  R restart  i which  f filter   Storage: Enter cleans
   Performance: b an earlier boot  Enter acts on a hint   Recovery: c check snapshots  f set up
-  Migration: e export this machine  o open a migration file  a install what it can   d details
+  Migration: e export  o open a file  a install    Restic: b back up  c check  s a file's history
+  Restic: Enter browse  R restore into a new folder  n record a baseline  v test it  w timer
 
 Running window
   Ctrl-C            stop; again, kill what is left  Enter / q   close when finished
@@ -141,6 +143,8 @@ enum Screen {
     Recovery,
     /// What this machine has, to take elsewhere, and a migration brought here.
     Migration,
+    /// Restic backups of your own files, and recovery tests.
+    Restic,
     Settings,
 }
 
@@ -220,6 +224,42 @@ enum MigrationRow {
 /// A migration file read here, or why it could not be.
 type MigrationOpened = (PathBuf, Result<Translation, String>);
 
+/// A line of the Restic screen.
+#[derive(Clone, Debug)]
+enum ResticRow {
+    Heading(String),
+    Text(String),
+    Snapshot(usize),
+    /// The browsed folder's parent.
+    Up,
+    Node(usize),
+    /// A version of a file the search found: the file, then the version.
+    Version(usize, usize),
+    Baseline(usize),
+}
+
+/// The repository as last read, and what restic said of it.
+#[derive(Clone, Debug)]
+struct ResticReading {
+    found: restic::Found,
+    snapshots: Result<Vec<restic::Snapshot>, String>,
+    /// Whether this restic restores without overwriting (0.17 and later).
+    restores: bool,
+    timer: Option<restic::Every>,
+    baselines: Vec<restic::Baseline>,
+}
+
+/// A folder of a snapshot, and what it holds.
+#[derive(Clone, Debug)]
+struct ResticBrowse {
+    snapshot: restic::Snapshot,
+    folder: String,
+    nodes: Result<Vec<restic::Node>, String>,
+}
+
+/// A search for a file's history, and what it found.
+type ResticSearch = (String, Result<Vec<restic::History>, String>);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Focus {
     Sidebar,
@@ -270,6 +310,14 @@ enum Asked {
     ExportMigration,
     /// The migration file to read here.
     OpenMigration,
+    /// The name or path whose history to look for in the snapshots.
+    ResticHistory,
+    /// The new folder to restore this snapshot (and only this path) into.
+    ResticRestore(String, Option<String>),
+    /// The file to record a baseline of.
+    ResticBaseline,
+    /// The snapshot to test the baseline with this id against.
+    ResticTest(String),
 }
 
 /// A line of the Offline bundles screen.
@@ -666,6 +714,16 @@ pub struct App {
     migration_opened: Option<(PathBuf, Translation)>,
     opening_migration: Option<mpsc::Receiver<MigrationOpened>>,
     migration_rows: Vec<MigrationRow>,
+    /// The restic repository as last read, and the screen's lines.
+    restic_reading: Option<ResticReading>,
+    reading_restic: Option<mpsc::Receiver<ResticReading>>,
+    restic_browse: Option<ResticBrowse>,
+    browsing_restic: Option<mpsc::Receiver<ResticBrowse>>,
+    restic_search: Option<ResticSearch>,
+    searching_restic: Option<mpsc::Receiver<ResticSearch>>,
+    restic_rows: Vec<ResticRow>,
+    /// What runs restic: restic itself, or a test's stand-in.
+    restic: std::sync::Arc<dyn Restic + Send + Sync>,
 }
 
 /// A plan of the queue as it was, from when it was made, with what the
@@ -780,6 +838,14 @@ impl App {
             migration_opened: None,
             opening_migration: None,
             migration_rows: Vec::new(),
+            restic_reading: None,
+            reading_restic: None,
+            restic_browse: None,
+            browsing_restic: None,
+            restic_search: None,
+            searching_restic: None,
+            restic_rows: Vec::new(),
+            restic: std::sync::Arc::new(restic::Here),
         };
         app.update_rows();
         if !args.bypass_root && nix::unistd::Uid::effective().is_root() {
@@ -1032,6 +1098,7 @@ impl App {
             Screen::Performance => self.performance_rows.len(),
             Screen::Recovery => self.recovery_found.len(),
             Screen::Migration => self.migration_rows.len(),
+            Screen::Restic => self.restic_rows.len(),
             Screen::Doctor => self.diagnoses.len() + self.doctor_entries().len(),
             Screen::Settings => self.settings().len(),
         }
@@ -1128,6 +1195,13 @@ impl App {
                 self.build_migration_rows();
             }
         }
+        if screen == Screen::Restic {
+            if self.restic_reading.is_none() {
+                self.read_restic();
+            } else {
+                self.build_restic_rows();
+            }
+        }
         self.update_rows();
     }
 
@@ -1190,6 +1264,42 @@ impl App {
                     return true;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => self.reading_migration = None,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if let Some(receiver) = &self.reading_restic {
+            match receiver.try_recv() {
+                Ok(found) => {
+                    self.restic_reading = Some(found);
+                    self.reading_restic = None;
+                    self.build_restic_rows();
+                    return true;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => self.reading_restic = None,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if let Some(receiver) = &self.browsing_restic {
+            match receiver.try_recv() {
+                Ok(found) => {
+                    self.restic_browse = Some(found);
+                    self.browsing_restic = None;
+                    self.build_restic_rows();
+                    return true;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => self.browsing_restic = None,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if let Some(receiver) = &self.searching_restic {
+            match receiver.try_recv() {
+                Ok(found) => {
+                    self.restic_search = Some(found);
+                    self.searching_restic = None;
+                    self.build_restic_rows();
+                    return true;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => self.searching_restic = None,
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
@@ -1298,6 +1408,7 @@ impl App {
             Screen::Performance => Icon::Performance,
             Screen::Recovery => Icon::Recovery,
             Screen::Migration => Icon::Migration,
+            Screen::Restic => Icon::Restic,
             Screen::Favorites => Icon::Favorites,
             Screen::Doctor => Icon::Doctor,
             Screen::Settings => Icon::Settings,
@@ -1380,6 +1491,7 @@ impl App {
             Screen::Performance => self.draw_performance(frame, main),
             Screen::Recovery => self.draw_recovery(frame, main),
             Screen::Migration => self.draw_migration(frame, main),
+            Screen::Restic => self.draw_restic(frame, main),
             Screen::Doctor => self.draw_doctor(frame, main),
             Screen::Settings => self.draw_settings(frame, main),
         }
@@ -2864,6 +2976,29 @@ impl App {
                     }
                     list.push(Hint::new(&["r"], "Read again"));
                 }
+                Screen::Restic => {
+                    list.push(Hint::new(&["↑↓"], "Navigate"));
+                    if self.restic_config().is_some() {
+                        match self
+                            .restic_rows
+                            .get(self.main_state.selected().unwrap_or(0))
+                        {
+                            Some(ResticRow::Snapshot(_)) => {
+                                list.push(Hint::new(&["Enter"], "Browse"));
+                                list.push(Hint::new(&["R"], "Restore"));
+                            }
+                            Some(ResticRow::Node(_) | ResticRow::Version(..)) => {
+                                list.push(Hint::new(&["R"], "Restore"));
+                            }
+                            Some(ResticRow::Baseline(_)) => list.push(Hint::new(&["v"], "Test")),
+                            _ => {}
+                        }
+                        list.push(Hint::new(&["b"], "Back up"));
+                        list.push(Hint::new(&["s"], "History"));
+                        list.push(Hint::new(&["n"], "Baseline"));
+                    }
+                    list.push(Hint::new(&["r"], "Read again"));
+                }
                 Screen::Settings => list.push(Hint::new(&["Enter"], "Change")),
             },
         }
@@ -3102,6 +3237,9 @@ impl App {
                     }
                     if self.screen == Screen::Migration {
                         self.reload_migration();
+                    }
+                    if self.screen == Screen::Restic {
+                        self.read_restic();
                     }
                 }
                 return true;
@@ -3700,6 +3838,40 @@ impl App {
                 }
                 KeyCode::Char('a') => self.apply_migration(),
                 KeyCode::Char('r') => self.reload_migration(),
+                KeyCode::Char('h') | KeyCode::Left => self.focus = Focus::Sidebar,
+                _ => {}
+            },
+            Screen::Restic => match key.code {
+                KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.open_restic_row(),
+                KeyCode::Char('R') => self.ask_restore(),
+                KeyCode::Char('d') => self.describe_restic(),
+                KeyCode::Char('b') => self.plan_restic(restic::plan_backup),
+                KeyCode::Char('c') => self.plan_restic(restic::plan_check),
+                KeyCode::Char('s') if self.restic_config().is_some() => {
+                    let mut ask = InputPopup::new(
+                        "A file's history",
+                        "A file name or path to look for in every snapshot, with * wildcards, such as notes.txt:",
+                    )
+                    .answering("Look");
+                    if let Some((pattern, _)) = &self.restic_search {
+                        ask = ask.with_value(pattern.clone());
+                    }
+                    self.popup = Some(Popup::Ask(ask, Asked::ResticHistory));
+                }
+                KeyCode::Char('n') => {
+                    self.popup = Some(Popup::Ask(
+                        InputPopup::new(
+                            "Record a baseline",
+                            "A file of your home folder whose SHA-256 to record, to test restores of it against:",
+                        )
+                        .path()
+                        .answering("Record"),
+                        Asked::ResticBaseline,
+                    ));
+                }
+                KeyCode::Char('v') => self.ask_test(),
+                KeyCode::Char('w') => self.toggle_restic_timer(),
+                KeyCode::Char('r') => self.read_restic(),
                 KeyCode::Char('h') | KeyCode::Left => self.focus = Focus::Sidebar,
                 _ => {}
             },
@@ -6047,6 +6219,19 @@ impl App {
                 return;
             }
             Asked::ExportMigration => ("Migration exported", self.export_migration(text)),
+            Asked::ResticHistory => {
+                self.search_restic(text.trim().to_string());
+                return;
+            }
+            Asked::ResticRestore(snapshot, include) => {
+                self.restore_restic(&snapshot, include.as_deref(), text);
+                return;
+            }
+            Asked::ResticBaseline => ("Baseline recorded", self.record_baseline(text)),
+            Asked::ResticTest(baseline) => {
+                self.test_restic(&baseline, text.trim());
+                return;
+            }
             Asked::OpenMigration => {
                 match typed_path(text) {
                     Ok(path) => self.open_migration(path),
@@ -7521,6 +7706,627 @@ impl App {
         frame.render_stateful_widget(list, inner, &mut self.main_state);
     }
 
+    // ----- Restic -----
+
+    /// The repository, when one is set up and usable.
+    fn restic_config(&self) -> Option<&restic::Config> {
+        match &self.restic_reading.as_ref()?.found {
+            restic::Found::Ready(config) => Some(config),
+            _ => None,
+        }
+    }
+
+    /// Read the repository and its snapshots in the background. Tests set
+    /// what was read themselves, so nothing of this machine's is asked.
+    fn read_restic(&mut self) {
+        if !self.examine_here {
+            self.build_restic_rows();
+            return;
+        }
+        let runner = self.restic.clone();
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let found = restic::here();
+            let snapshots = match &found {
+                restic::Found::Ready(config) => restic::snapshots(runner.as_ref(), config),
+                _ => Ok(Vec::new()),
+            };
+            let _ = sender.send(ResticReading {
+                restores: matches!(found, restic::Found::Ready(_))
+                    && restic::restores_safely(runner.as_ref()),
+                found,
+                snapshots,
+                timer: restic::units_here().and_then(|units| restic::timer(&units)),
+                baselines: history::state_dir()
+                    .map(|state| restic::baselines(&state))
+                    .unwrap_or_default(),
+            });
+        });
+        self.reading_restic = Some(receiver);
+        self.build_restic_rows();
+    }
+
+    /// List a folder of a snapshot: in the background, or at once in tests.
+    fn browse_restic(&mut self, snapshot: restic::Snapshot, folder: String) {
+        let Some(config) = self.restic_config().cloned() else {
+            return;
+        };
+        let runner = self.restic.clone();
+        let work = move || {
+            let nodes = restic::files(runner.as_ref(), &config, &snapshot.id, &folder);
+            ResticBrowse {
+                snapshot,
+                folder,
+                nodes,
+            }
+        };
+        if self.examine_here {
+            let (sender, receiver) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = sender.send(work());
+            });
+            self.browsing_restic = Some(receiver);
+        } else {
+            self.restic_browse = Some(work());
+        }
+        self.build_restic_rows();
+    }
+
+    /// Look for a file's history across the snapshots.
+    fn search_restic(&mut self, pattern: String) {
+        let Some(config) = self.restic_config().cloned() else {
+            return;
+        };
+        let runner = self.restic.clone();
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        let work = move || {
+            let found = restic::history(runner.as_ref(), &config, &home, &pattern, false);
+            (pattern, found)
+        };
+        if self.examine_here {
+            let (sender, receiver) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = sender.send(work());
+            });
+            self.searching_restic = Some(receiver);
+        } else {
+            self.restic_search = Some(work());
+        }
+        self.build_restic_rows();
+    }
+
+    fn restic_snapshots(&self) -> &[restic::Snapshot] {
+        self.restic_reading
+            .as_ref()
+            .and_then(|reading| reading.snapshots.as_ref().ok())
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    fn selected_restic_row(&self) -> Option<&ResticRow> {
+        self.restic_rows.get(self.main_state.selected()?)
+    }
+
+    /// Enter: browse a snapshot or folder, go up, restore a file, test a
+    /// baseline.
+    fn open_restic_row(&mut self) {
+        match self.selected_restic_row().cloned() {
+            Some(ResticRow::Snapshot(index)) => {
+                let snapshot = self.restic_snapshots()[index].clone();
+                let folder = snapshot
+                    .paths
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "/".into());
+                self.browse_restic(snapshot, folder);
+            }
+            Some(ResticRow::Up) => {
+                if let Some(browse) = &self.restic_browse {
+                    let parent = Path::new(&browse.folder)
+                        .parent()
+                        .map(|parent| parent.display().to_string())
+                        .unwrap_or_else(|| "/".into());
+                    let snapshot = browse.snapshot.clone();
+                    self.browse_restic(snapshot, parent);
+                }
+            }
+            Some(ResticRow::Node(index)) => {
+                let Some(browse) = &self.restic_browse else {
+                    return;
+                };
+                let Some(node) = browse
+                    .nodes
+                    .as_ref()
+                    .ok()
+                    .and_then(|nodes| nodes.get(index))
+                else {
+                    return;
+                };
+                if node.is_dir() {
+                    let (snapshot, folder) = (browse.snapshot.clone(), node.path.clone());
+                    self.browse_restic(snapshot, folder);
+                } else {
+                    self.ask_restore();
+                }
+            }
+            Some(ResticRow::Version(..)) => self.ask_restore(),
+            Some(ResticRow::Baseline(_)) => self.ask_test(),
+            _ => {}
+        }
+    }
+
+    /// The snapshot and path the selected row would restore.
+    fn restic_restore_target(&self) -> Option<(String, Option<String>)> {
+        match self.selected_restic_row()? {
+            ResticRow::Snapshot(index) => {
+                Some((self.restic_snapshots().get(*index)?.id.clone(), None))
+            }
+            ResticRow::Node(index) => {
+                let browse = self.restic_browse.as_ref()?;
+                let node = browse.nodes.as_ref().ok()?.get(*index)?;
+                Some((browse.snapshot.id.clone(), Some(node.path.clone())))
+            }
+            ResticRow::Version(file, version) => {
+                let found = self.restic_search.as_ref()?.1.as_ref().ok()?.get(*file)?;
+                Some((
+                    found.versions.get(*version)?.snapshot.clone(),
+                    Some(found.path.clone()),
+                ))
+            }
+            _ => None,
+        }
+    }
+
+    fn ask_restore(&mut self) {
+        let Some((snapshot, include)) = self.restic_restore_target() else {
+            return;
+        };
+        if !self
+            .restic_reading
+            .as_ref()
+            .is_some_and(|reading| reading.restores)
+        {
+            self.popup = Some(Popup::Text(TextPopup::new(
+                "Cannot restore here",
+                "This restic cannot restore without overwriting and check what it wrote; restic 0.17 or later can.",
+                true,
+            )));
+            return;
+        }
+        let what = include
+            .as_deref()
+            .map(helix_toolbox_core::printable)
+            .unwrap_or_else(|| "the whole snapshot".to_string());
+        self.popup = Some(Popup::Ask(
+            InputPopup::new(
+                "Restore into a new folder",
+                format!(
+                    "Where to restore {what} from {}: a new folder of your home folder; nothing is overwritten.",
+                    &snapshot[..snapshot.len().min(8)]
+                ),
+            )
+            .with_value("~/restored".to_string())
+            .path()
+            .answering("Restore"),
+            Asked::ResticRestore(snapshot, include),
+        ));
+    }
+
+    fn restore_restic(&mut self, snapshot: &str, include: Option<&str>, text: &str) {
+        let planned = (|| -> Result<Plan, String> {
+            let config = self
+                .restic_config()
+                .ok_or("No restic repository is set up.")?;
+            let home = std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .ok_or("there is no home folder")?;
+            let target = restic::check_target(&home, &typed_path(text)?)?;
+            restic::plan_restore(config, snapshot, &target, include)
+        })();
+        self.confirm_restic(planned);
+    }
+
+    fn ask_test(&mut self) {
+        let Some(ResticRow::Baseline(index)) = self.selected_restic_row() else {
+            return;
+        };
+        let Some(baseline) = self
+            .restic_reading
+            .as_ref()
+            .and_then(|reading| reading.baselines.get(*index))
+        else {
+            return;
+        };
+        self.popup = Some(Popup::Ask(
+            InputPopup::new(
+                "Test a restore",
+                format!(
+                    "The snapshot to restore {} from and compare (latest, or a snapshot's id):",
+                    helix_toolbox_core::printable(&baseline.path)
+                ),
+            )
+            .with_value("latest".to_string())
+            .answering("Test"),
+            Asked::ResticTest(baseline.id.clone()),
+        ));
+    }
+
+    fn test_restic(&mut self, baseline: &str, snapshot: &str) {
+        let planned = (|| -> Result<Plan, String> {
+            let config = self
+                .restic_config()
+                .ok_or("No restic repository is set up.")?;
+            let reading = self.restic_reading.as_ref().ok_or("Nothing read yet.")?;
+            let chosen = restic::find_baseline(&reading.baselines, baseline)
+                .ok_or("That baseline is not there.")?;
+            restic::plan_test(
+                config,
+                chosen,
+                if snapshot.is_empty() {
+                    "latest"
+                } else {
+                    snapshot
+                },
+            )
+        })();
+        self.confirm_restic(planned);
+    }
+
+    /// A backup or check of the repository, to review.
+    fn plan_restic(&mut self, make: fn(&restic::Config) -> Plan) {
+        match self.restic_config() {
+            Some(config) => {
+                let planned = make(config);
+                self.confirm_plan(Ok(planned));
+            }
+            None => self.no_restic(),
+        }
+    }
+
+    fn confirm_restic(&mut self, planned: Result<Plan, String>) {
+        match planned {
+            Ok(planned) => self.confirm_plan(Ok(planned)),
+            Err(why) => {
+                self.popup = Some(Popup::Text(TextPopup::new("Cannot plan", why, true)));
+            }
+        }
+    }
+
+    fn no_restic(&mut self) {
+        self.popup = Some(Popup::Text(TextPopup::new(
+            "No repository",
+            "Name the repository and its password under [restic] in settings.toml (helix-toolbox restic says how), or with restic's RESTIC_REPOSITORY.",
+            true,
+        )));
+    }
+
+    fn record_baseline(&mut self, text: &str) -> Result<String, String> {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or("there is no home folder")?;
+        let state = history::state_dir().ok_or("cannot find the state folder")?;
+        let recorded = restic::record(&state, &home, &typed_path(text)?, history::now())?;
+        if let Some(reading) = &mut self.restic_reading {
+            reading.baselines = restic::baselines(&state);
+        }
+        self.build_restic_rows();
+        Ok(format!(
+            "{}: SHA-256 {}.\n\nBack it up, then v on it restores it from a snapshot and compares.",
+            recorded.path, recorded.sha256
+        ))
+    }
+
+    /// The daily backup on, or off when it is on.
+    fn toggle_restic_timer(&mut self) {
+        if !self.examine_here {
+            return;
+        }
+        let Some(config) = self.restic_config().cloned() else {
+            self.no_restic();
+            return;
+        };
+        let said = (|| -> Result<String, String> {
+            let units =
+                restic::units_here().ok_or("there is no home folder to keep the timer in")?;
+            if restic::timer(&units).is_some() {
+                restic::timer_off(&units, &notifications::systemctl)?;
+                return Ok("The timed backup is off.".to_string());
+            }
+            let program = std::env::current_exe().map_err(|error| error.to_string())?;
+            let started = restic::timer_on(
+                &units,
+                &program,
+                &config,
+                restic::Every::Day,
+                &notifications::systemctl,
+            )?;
+            Ok(format!(
+                "The backup runs every day{}. helix-toolbox restic timer on --weekly runs it every week instead.",
+                match started {
+                    notifications::Started::Now => "",
+                    notifications::Started::AtLogin => ", from the next login",
+                }
+            ))
+        })();
+        if let Some(reading) = &mut self.restic_reading {
+            reading.timer = restic::units_here().and_then(|units| restic::timer(&units));
+        }
+        self.build_restic_rows();
+        self.popup = Some(Popup::Text(match said {
+            Ok(text) => TextPopup::new("Timed backup", text, true),
+            Err(why) => TextPopup::new("The timer did not change", why, true),
+        }));
+    }
+
+    fn describe_restic(&mut self) {
+        let text = match self.selected_restic_row() {
+            Some(ResticRow::Snapshot(index)) => {
+                let Some(snapshot) = self.restic_snapshots().get(*index) else {
+                    return;
+                };
+                format!(
+                    "Snapshot {} of {}, taken {}.\nFolders: {}\n\nEnter browses it; R restores it into a new folder.",
+                    snapshot.id,
+                    helix_toolbox_core::printable(&snapshot.hostname),
+                    snapshot.when(),
+                    helix_toolbox_core::printable(&snapshot.paths.join(", "))
+                )
+            }
+            Some(ResticRow::Baseline(index)) => {
+                let Some(baseline) = self
+                    .restic_reading
+                    .as_ref()
+                    .and_then(|reading| reading.baselines.get(*index))
+                else {
+                    return;
+                };
+                format!(
+                    "{}\nSHA-256 {}, recorded {}.\n\nv restores it from a snapshot into a temporary folder and compares.",
+                    helix_toolbox_core::printable(&baseline.path),
+                    baseline.sha256,
+                    timestamp(baseline.recorded)
+                )
+            }
+            _ => return,
+        };
+        self.popup = Some(Popup::Text(TextPopup::new("Restic", text, true)));
+    }
+
+    fn build_restic_rows(&mut self) {
+        let mut rows = vec![ResticRow::Heading("The repository".into())];
+        match self.restic_reading.as_ref().map(|reading| &reading.found) {
+            None if self.reading_restic.is_some() => {
+                rows.push(ResticRow::Text("Asking restic…".into()))
+            }
+            None => rows.push(ResticRow::Text("Press r to read the repository.".into())),
+            Some(restic::Found::Missing) => {
+                rows.push(ResticRow::Text("No restic repository is set up.".into()));
+                rows.push(ResticRow::Text(
+                    "Name it under [restic] in settings.toml: repository = \"…\", password_file = \"…\"; helix-toolbox restic shows how.".into(),
+                ));
+            }
+            Some(restic::Found::Problem(why)) => rows.push(ResticRow::Text(why.clone())),
+            Some(restic::Found::Ready(config)) => {
+                rows.push(ResticRow::Text(format!(
+                    "{} (from {})",
+                    helix_toolbox_core::printable(&config.repository),
+                    config.origin.label()
+                )));
+                rows.push(ResticRow::Text(format!(
+                    "Password from {}",
+                    config.password.describe()
+                )));
+                rows.push(ResticRow::Text(format!(
+                    "Backs up {}; the timer is {}",
+                    config
+                        .paths
+                        .iter()
+                        .map(|path| path.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    self.restic_reading
+                        .as_ref()
+                        .and_then(|reading| reading.timer)
+                        .map(restic::Every::label)
+                        .unwrap_or("off")
+                )));
+                rows.push(ResticRow::Text(
+                    "b backs up, c checks, w turns the daily backup on or off, s looks for a file's history.".into(),
+                ));
+            }
+        }
+        if let Some(reading) = &self.restic_reading
+            && matches!(reading.found, restic::Found::Ready(_))
+        {
+            match &reading.snapshots {
+                Ok(snapshots) => {
+                    rows.push(ResticRow::Heading(format!(
+                        "Snapshots ({})",
+                        snapshots.len()
+                    )));
+                    rows.extend((0..snapshots.len()).map(ResticRow::Snapshot));
+                }
+                Err(why) => rows.push(ResticRow::Text(format!(
+                    "restic could not read the repository: {why}"
+                ))),
+            }
+        }
+        if self.browsing_restic.is_some() {
+            rows.push(ResticRow::Heading("Listing the folder…".into()));
+        } else if let Some(browse) = &self.restic_browse {
+            rows.push(ResticRow::Heading(format!(
+                "In {} at {}",
+                browse.snapshot.short_id,
+                helix_toolbox_core::printable(&browse.folder)
+            )));
+            if browse.folder != "/" {
+                rows.push(ResticRow::Up);
+            }
+            match &browse.nodes {
+                Ok(nodes) if nodes.is_empty() => rows.push(ResticRow::Text("Nothing here.".into())),
+                Ok(nodes) => rows.extend((0..nodes.len()).map(ResticRow::Node)),
+                Err(why) => rows.push(ResticRow::Text(why.clone())),
+            }
+        }
+        if self.searching_restic.is_some() {
+            rows.push(ResticRow::Heading("Looking through the snapshots…".into()));
+        } else if let Some((pattern, found)) = &self.restic_search {
+            rows.push(ResticRow::Heading(format!(
+                "History of {}",
+                helix_toolbox_core::printable(pattern)
+            )));
+            match found {
+                Ok(files) if files.is_empty() => rows.push(ResticRow::Text(
+                    "No snapshot has a file that matches.".into(),
+                )),
+                Ok(files) => {
+                    for (index, file) in files.iter().enumerate() {
+                        rows.push(ResticRow::Text(helix_toolbox_core::printable(&file.path)));
+                        rows.extend(
+                            (0..file.versions.len())
+                                .map(|version| ResticRow::Version(index, version)),
+                        );
+                        if file.missing_from > 0 {
+                            rows.push(ResticRow::Text(format!(
+                                "Not in the {} newer snapshot(s) of the same folder: deleted or moved since.",
+                                file.missing_from
+                            )));
+                        }
+                    }
+                }
+                Err(why) => rows.push(ResticRow::Text(why.clone())),
+            }
+        }
+        if let Some(reading) = &self.restic_reading {
+            rows.push(ResticRow::Heading(format!(
+                "Recovery tests ({} baselines)",
+                reading.baselines.len()
+            )));
+            rows.push(ResticRow::Text(
+                "n records a file's SHA-256; v on one restores it from a snapshot and compares."
+                    .into(),
+            ));
+            rows.extend((0..reading.baselines.len()).map(ResticRow::Baseline));
+        }
+        self.restic_rows = rows;
+        self.clamp_main();
+    }
+
+    fn draw_restic(&mut self, frame: &mut Frame, area: Rect) {
+        let inner = self.page(
+            frame,
+            area,
+            "Restic",
+            "Backups of your own files: snapshots, a file's history, restores into a new folder and recovery tests.",
+        );
+        self.fill(frame, inner);
+        let focused = self.focus == Focus::Main;
+        let muted = Style::default().fg(self.theme.muted());
+        let printable = helix_toolbox_core::printable;
+        let size = |bytes: Option<u64>| bytes.map(storage::shown).unwrap_or_default();
+        let snapshots = self.restic_snapshots();
+        let mut items: Vec<Line> = Vec::new();
+        for row in &self.restic_rows {
+            items.push(match row {
+                ResticRow::Heading(text) => {
+                    Line::styled(text.clone(), Style::default().fg(self.theme.group()).bold())
+                }
+                ResticRow::Text(text) => Line::styled(format!("  {text}"), muted),
+                ResticRow::Snapshot(index) => {
+                    let snapshot = &snapshots[*index];
+                    Line::from(vec![
+                        Span::styled(
+                            format!("  {}  {}  ", snapshot.short_id, snapshot.when()),
+                            Style::default().fg(self.theme.entry()),
+                        ),
+                        Span::styled(
+                            format!(
+                                "{:<16} {}",
+                                printable(&snapshot.hostname),
+                                printable(&snapshot.paths.join(", "))
+                            ),
+                            muted,
+                        ),
+                    ])
+                }
+                ResticRow::Up => Line::styled("  ..", Style::default().fg(self.theme.entry())),
+                ResticRow::Node(index) => {
+                    let node =
+                        &self.restic_browse.as_ref().unwrap().nodes.as_ref().unwrap()[*index];
+                    if node.is_dir() {
+                        Line::styled(
+                            format!("  {}/", printable(&node.name)),
+                            Style::default().fg(self.theme.group()),
+                        )
+                    } else {
+                        Line::from(vec![
+                            Span::styled(
+                                format!("  {:<40} ", printable(&node.name)),
+                                Style::default().fg(self.theme.entry()),
+                            ),
+                            Span::styled(size(node.size), muted),
+                        ])
+                    }
+                }
+                ResticRow::Version(file, version) => {
+                    let found = &self.restic_search.as_ref().unwrap().1.as_ref().unwrap()[*file];
+                    let version = &found.versions[*version];
+                    Line::from(vec![
+                        Span::styled(
+                            format!(
+                                "    {}  {}  ",
+                                version.short_id,
+                                version
+                                    .time
+                                    .replace('T', " ")
+                                    .get(..16)
+                                    .unwrap_or(&version.time)
+                            ),
+                            Style::default().fg(self.theme.entry()),
+                        ),
+                        Span::styled(
+                            format!(
+                                "{:<10} {}",
+                                size(version.size),
+                                match version.change {
+                                    restic::Change::First => "first",
+                                    restic::Change::Changed => "changed",
+                                    restic::Change::Same => "same",
+                                }
+                            ),
+                            muted,
+                        ),
+                    ])
+                }
+                ResticRow::Baseline(index) => {
+                    let baseline = &self.restic_reading.as_ref().unwrap().baselines[*index];
+                    Line::from(vec![
+                        Span::styled(
+                            format!("  {}  ", &baseline.sha256[..baseline.sha256.len().min(12)]),
+                            Style::default().fg(self.theme.entry()),
+                        ),
+                        Span::styled(
+                            format!(
+                                "{}  {}",
+                                timestamp(baseline.recorded),
+                                printable(&baseline.path)
+                            ),
+                            muted,
+                        ),
+                    ])
+                }
+            });
+        }
+        let list = List::new(items)
+            .block(self.card("Restic"))
+            .highlight_style(self.highlight(focused))
+            .highlight_symbol(self.marker(focused))
+            .scroll_padding(1);
+        frame.render_stateful_widget(list, inner, &mut self.main_state);
+    }
+
     // ----- Offline bundles -----
 
     fn selected_bundle_row(&self) -> Option<BundleRow> {
@@ -8318,6 +9124,11 @@ fn build_menu(catalog: &Catalog) -> Vec<MenuItem> {
     menu.push(MenuItem {
         label: "Migration".into(),
         screen: Screen::Migration,
+        section: "MORE TOOLS",
+    });
+    menu.push(MenuItem {
+        label: "Restic".into(),
+        screen: Screen::Restic,
         section: "MORE TOOLS",
     });
     menu.push(MenuItem {
@@ -9721,6 +10532,164 @@ mod tests {
         )
         .unwrap();
         path
+    }
+
+    /// restic answering from a fixed repository, for the Restic screen's
+    /// tests.
+    struct FakeRestic;
+
+    impl Restic for FakeRestic {
+        fn run(&self, args: &[String]) -> Result<String, String> {
+            let line = args.join(" ");
+            if line.contains(" ls ") {
+                Ok([
+                    r#"{"struct_type":"snapshot","id":"b6f77f6d00"}"#,
+                    r#"{"name":"me","type":"dir","path":"/home/me","struct_type":"node"}"#,
+                    r#"{"name":"Documents","type":"dir","path":"/home/me/Documents","struct_type":"node"}"#,
+                    r#"{"name":"notes.txt","type":"file","path":"/home/me/notes.txt","size":6,"struct_type":"node"}"#,
+                ]
+                .join("\n"))
+            } else if line.contains(" snapshots ") {
+                Ok(r#"[{"id":"b6f77f6d00","short_id":"b6f77f6d","time":"2026-10-21T22:00:04+02:00","hostname":"t15p","paths":["/home/me"]},{"id":"aa0d9cfe00","short_id":"aa0d9cfe","time":"2026-10-20T22:00:04+02:00","hostname":"t15p","paths":["/home/me"]}]"#.to_string())
+            } else if line.contains(" find ") {
+                Ok(r#"[{"matches":[{"type":"file","path":"/home/me/notes.txt","size":6}],"snapshot":"b6f77f6d00"},{"matches":[{"type":"file","path":"/home/me/notes.txt","size":5}],"snapshot":"aa0d9cfe00"}]"#.to_string())
+            } else {
+                Err(format!("not answered: {line}"))
+            }
+        }
+    }
+
+    fn restic_app(baselines: Vec<restic::Baseline>) -> App {
+        let mut app = app();
+        app.restic = std::sync::Arc::new(FakeRestic);
+        let config = restic::Config {
+            repository: "/run/media/me/Backup/restic".into(),
+            origin: restic::Origin::Settings,
+            password: restic::Password::File("/home/me/.restic-password".into()),
+            paths: vec!["/home/me".into()],
+            excludes: Vec::new(),
+        };
+        app.restic_reading = Some(ResticReading {
+            snapshots: restic::snapshots(&FakeRestic, &config),
+            found: restic::Found::Ready(config),
+            restores: true,
+            timer: None,
+            baselines,
+        });
+        app
+    }
+
+    #[test]
+    fn the_restic_screen_lists_snapshots_browses_them_and_finds_a_files_history() {
+        let mut app = app();
+        app.restic_reading = Some(ResticReading {
+            found: restic::Found::Missing,
+            snapshots: Ok(Vec::new()),
+            restores: false,
+            timer: None,
+            baselines: Vec::new(),
+        });
+        app.open_screen(Screen::Restic);
+        let shown = screen(&mut app, 140, 40);
+        assert!(shown.contains("No restic repository is set up"), "{shown}");
+        let mut app = restic_app(Vec::new());
+        app.open_screen(Screen::Restic);
+        app.focus = Focus::Main;
+        let shown = screen(&mut app, 140, 40);
+        for text in [
+            "/run/media/me/Backup/restic (from Helix Toolbox's settings)",
+            "Snapshots (2)",
+            "b6f77f6d  2026-10-21 22:00",
+            "Recovery tests (0 baselines)",
+        ] {
+            assert!(shown.contains(text), "{text}: {shown}");
+        }
+        let first = app
+            .restic_rows
+            .iter()
+            .position(|row| matches!(row, ResticRow::Snapshot(0)))
+            .unwrap();
+        app.main_state.select(Some(first));
+        press(&mut app, KeyCode::Enter);
+        let shown = screen(&mut app, 140, 40);
+        for text in ["In b6f77f6d at /home/me", "Documents/", "notes.txt", ".."] {
+            assert!(shown.contains(text), "{text}: {shown}");
+        }
+        press(&mut app, KeyCode::Char('s'));
+        assert!(matches!(
+            app.popup,
+            Some(Popup::Ask(_, Asked::ResticHistory))
+        ));
+        type_text(&mut app, "notes.txt");
+        press(&mut app, KeyCode::Enter);
+        let shown = screen(&mut app, 140, 40);
+        for text in [
+            "History of notes.txt",
+            "/home/me/notes.txt",
+            "changed",
+            "first",
+        ] {
+            assert!(shown.contains(text), "{text}: {shown}");
+        }
+    }
+
+    #[test]
+    fn the_restic_screen_reviews_restores_backups_and_recovery_tests_before_they_run() {
+        let baseline = restic::Baseline {
+            id: "1792600000000".into(),
+            path: "/home/me/notes.txt".into(),
+            sha256: "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03".into(),
+            recorded: 1_792_600_000,
+        };
+        let mut app = restic_app(vec![baseline]);
+        app.open_screen(Screen::Restic);
+        app.focus = Focus::Main;
+        press(&mut app, KeyCode::Char('b'));
+        assert!(matches!(app.popup, Some(Popup::Confirm(_))));
+        assert!(screen(&mut app, 140, 40).contains("'backup' '--exclude-caches'"));
+        press(&mut app, KeyCode::Char('n'));
+        assert!(!matches!(app.popup, Some(Popup::Running(_))));
+        // A restore asks for a new folder, which must not be there yet.
+        let first = app
+            .restic_rows
+            .iter()
+            .position(|row| matches!(row, ResticRow::Snapshot(0)))
+            .unwrap();
+        app.main_state.select(Some(first));
+        press(&mut app, KeyCode::Char('R'));
+        assert!(matches!(
+            app.popup,
+            Some(Popup::Ask(_, Asked::ResticRestore(..)))
+        ));
+        let home = std::env::var("HOME").unwrap();
+        for _ in 0.."~/restored".len() {
+            press(&mut app, KeyCode::Backspace);
+        }
+        type_text(&mut app, &home);
+        press(&mut app, KeyCode::Enter);
+        assert!(screen(&mut app, 140, 40).contains("is there already"));
+        press(&mut app, KeyCode::Esc);
+        // v on a baseline tests a restore of it, after review.
+        let baseline = app
+            .restic_rows
+            .iter()
+            .position(|row| matches!(row, ResticRow::Baseline(0)))
+            .unwrap();
+        app.main_state.select(Some(baseline));
+        press(&mut app, KeyCode::Char('v'));
+        assert!(matches!(
+            app.popup,
+            Some(Popup::Ask(_, Asked::ResticTest(_)))
+        ));
+        press(&mut app, KeyCode::Enter);
+        assert!(matches!(app.popup, Some(Popup::Confirm(_))));
+        let shown = screen(&mut app, 140, 40);
+        assert!(
+            shown.contains("Test a restore against its baseline"),
+            "{shown}"
+        );
+        press(&mut app, KeyCode::Char('n'));
+        assert!(!matches!(app.popup, Some(Popup::Running(_))));
     }
 
     #[test]

@@ -21,6 +21,10 @@ import type {
   Prepared,
   RecordView,
   RecoveryView,
+  ResticHistory,
+  ResticNode,
+  ResticView,
+  Baseline,
   MigrationExportView,
   TranslationView,
   ReliabilityView,
@@ -107,6 +111,16 @@ export const exportMigration = (path: string | null = null) => call<string | nul
 /** Read a migration file from `path`, or one the file chooser names; null when it was closed. */
 export const openMigration = (path: string | null = null) => call<TranslationView | null>('open_migration', { path });
 export const prepareMigration = (path: string) => call<Prepared>('prepare_migration', { path });
+export const restic = () => call<ResticView>('read_restic');
+export const resticFiles = (snapshot: string, folder: string) => call<ResticNode[]>('restic_files', { snapshot, folder });
+export const resticHistory = (pattern: string, ignoreCase: boolean) => call<ResticHistory[]>('restic_history', { pattern, ignoreCase });
+/** A restic plan: `check`, `backup`, `restore` (into the new folder `target`) or `test` (a baseline against a snapshot). */
+export const prepareRestic = (
+  action: 'check' | 'backup' | 'restore' | 'test',
+  options: { snapshot?: string; target?: string; include?: string; baseline?: string } = {},
+) => call<Prepared>('prepare_restic', { action, snapshot: null, target: null, include: null, baseline: null, ...options });
+export const recordBaseline = (path: string) => call<Baseline>('record_baseline', { path });
+export const setResticTimer = (on: boolean, weekly: boolean) => call<string>('set_restic_timer', { on, weekly });
 
 export const hardware = () => call<Hardware>('read_hardware');
 export const prepareFirmware = (index: number) => call<Prepared>('prepare_firmware', { index });

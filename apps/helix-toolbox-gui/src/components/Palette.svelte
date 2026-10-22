@@ -48,6 +48,7 @@
     { screen: { kind: 'performance' }, label: 'Performance' },
     { screen: { kind: 'recovery' }, label: 'Recovery' },
     { screen: { kind: 'migration' }, label: 'Migration' },
+    { screen: { kind: 'restic' }, label: 'Restic' },
     { screen: { kind: 'bundles' }, label: 'Offline bundles' },
     { screen: { kind: 'desktop' }, label: 'Desktop' },
     { screen: { kind: 'settings' }, label: 'Settings' },
