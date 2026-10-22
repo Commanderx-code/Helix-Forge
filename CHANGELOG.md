@@ -6,6 +6,10 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
 
 ## v1.20.0
 
+- **Command Center's settings.** Where Helix Toolbox has none of its own,
+  Restic, Repositories, Configs and Home Manager read the repository, the
+  project folders, the configuration files and the Home Manager flake from
+  the settings Command Center left, without changing them.
 - **Restic.** **Restic**, in the window and the terminal interface, shows
   the restic repository of your own files and its snapshots: browse the
   folders of one, look for every version of a file across all of them
