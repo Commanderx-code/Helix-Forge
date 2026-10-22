@@ -1082,12 +1082,19 @@ def recovery_and_restores(machine, shots):
     snapshot taken and the snapshot check run as root, which only reads."""
     restored_and_undone(machine, '$HOME/.config/hf-restore/config', '')
     restored_and_undone(machine, '/etc/hf-restore/hf.conf', 'sudo ')
-    ready = json.loads(machine.ssh('./helix-toolbox --json recovery').stdout)['data']
+    read = lambda: json.loads(machine.ssh('./helix-toolbox --json recovery').stdout)['data']
+    ready = read()
     ids = [check['id'] for check in ready['checks']]
     if ids[0] != 'snapshots' or 'configuration-backups' not in ids:
         raise RuntimeError(f'the recovery checks are {ids}')
+    root = machine.ssh('findmnt -no FSTYPE /').stdout.strip()
+    if ready['snapshots'] != 'Snapper' and root == 'btrfs':
+        # The cloud image has Btrfs but no Snapper: set it up as an
+        # installation would, so the check has snapshots to look at.
+        machine.ssh('sudo zypper -n -q in snapper >/dev/null && sudo snapper -c root create-config /', check=False)
+        ready = read()
     if ready['snapshots'] != 'Snapper':
-        log(f'  recovery: two restores put back and undone; no Snapper here ({ready["snapshots"]}), so no snapshot check')
+        log(f'  recovery: two restores put back and undone; no Snapper on {root}, so no snapshot check')
         return
     machine.ssh("sudo snapper -c root create --description 'Helix Toolbox test'")
     checked = machine.ssh('./helix-toolbox recovery --check-snapshots --yes').stdout
