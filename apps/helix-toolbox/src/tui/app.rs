@@ -110,7 +110,7 @@ History, Backups, Doctor, Hardware, Desktop, Updates, Drift, Reliability, Settin
 
 Running window
   Ctrl-C            stop; again, kill what is left  Enter / q   close when finished
-  l                 save the log                 Page up / down   scroll
+  l                 save the log                 Page up / down   scroll;  a report: c copies it
 ";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -764,6 +764,8 @@ pub struct App {
     reports_dir: Option<PathBuf>,
     /// Opens a link in the browser; tests answer for it.
     opener: fn(&str) -> Result<(), String>,
+    /// Copies a report; tests answer for it.
+    copier: fn(&str) -> Result<String, String>,
     /// The machine a hardware report names, in tests; read each time
     /// otherwise.
     machine: Option<hardware_report::Machine>,
@@ -922,6 +924,7 @@ impl App {
             reporting: None,
             reports_dir: None,
             opener: |_| Err("there is no browser here".to_string()),
+            copier: |_| Err("there is no clipboard here".to_string()),
             machine: None,
             services_found: None,
             service_rows: Vec::new(),
@@ -1005,6 +1008,7 @@ impl App {
         self.systemctl = notifications::systemctl;
         self.reports_dir = history::state_dir();
         self.opener = open_link;
+        self.copier = super::clipboard::copy;
         self
     }
 
@@ -3200,6 +3204,15 @@ impl App {
     pub fn handle_key(&mut self, key: &KeyEvent) -> bool {
         let control_c =
             key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c');
+        if let Some(Popup::Text(popup) | Popup::HardwareReport(popup, _)) = &mut self.popup
+            && key.code == KeyCode::Char('c')
+            && let Some(text) = popup.copyable()
+        {
+            let said = (self.copier)(text)
+                .unwrap_or_else(|error| format!("The report could not be copied: {error}"));
+            popup.noted(said);
+            return true;
+        }
         match &mut self.popup {
             Some(Popup::Text(popup)) => {
                 if popup.handle_key(key) {
@@ -6582,7 +6595,9 @@ impl App {
         );
         // Over anything but a run or a question.
         if matches!(self.popup, None | Some(Popup::Text(_))) {
-            self.popup = Some(Popup::Text(TextPopup::new("Bug report", text, true)));
+            self.popup = Some(Popup::Text(
+                TextPopup::new("Bug report", text, true).copying(report),
+            ));
         }
     }
 
@@ -6674,10 +6689,11 @@ impl App {
             TextPopup::new(
                 "Hardware report",
                 format!(
-                    "{text}\no opens the issue in your browser, filled in; GitHub asks you to sign in, and the form asks what you checked. Nothing is sent until you submit it there."
+                    "{text}\no opens the issue in your browser, filled in; GitHub asks you to sign in, and the form asks what you checked. Nothing is sent until you submit it there. c copies the report."
                 ),
                 true,
-            ),
+            )
+            .copying(format!("{text}\nThe issue, filled in:\n\n{url}\n")),
             url,
         ));
     }
@@ -11300,6 +11316,18 @@ mod tests {
         assert!(shown.contains("Paste it into a new issue"), "{shown}");
         let saved = std::fs::read_to_string(directory.path().join("bug-report.md")).unwrap();
         assert!(saved.contains("### Helix Toolbox report"), "{saved}");
+        // c copies the report itself, not the words around it.
+        assert!(shown.contains("c Copy"), "{shown}");
+        app.copier = |text| {
+            if text.starts_with("### Helix Toolbox report") {
+                Ok("Copied with wl-copy.".into())
+            } else {
+                Err(format!("not the report: {text}"))
+            }
+        };
+        press(&mut app, KeyCode::Char('c'));
+        assert!(screen(&mut app, 120, 40).contains("Copied with wl-copy."));
+        assert!(matches!(app.popup, Some(Popup::Text(_))));
         let (choices, _) = app.palette_choices();
         assert!(
             choices
@@ -11948,6 +11976,17 @@ mod tests {
         );
         let saved = std::fs::read_to_string(reports.path().join("hardware-report.md")).unwrap();
         assert!(saved.contains(url.as_str()));
+        // c copies the report with its issue link, as the window's Copy does.
+        app.copier = |text| {
+            if text.contains("[[hardware]]") && text.contains("The issue, filled in:") {
+                Ok("Copied with xclip.".into())
+            } else {
+                Err(format!("not the report: {text}"))
+            }
+        };
+        press(&mut app, KeyCode::Char('c'));
+        assert!(screen(&mut app, 140, 40).contains("Copied with xclip."));
+        assert!(matches!(app.popup, Some(Popup::HardwareReport(..))));
         app.opener = |url| {
             if url.starts_with(hardware_report::ISSUES) {
                 Ok(())

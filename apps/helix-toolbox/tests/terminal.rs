@@ -1337,6 +1337,9 @@ fn unfinished_entries_stay_in_the_install_plan_after_a_run() {
     tui.wait_for(&["CONFIRM", "After a failed step: stop"]);
     tui.keys("y");
     tui.wait_for(&["FAILED", "0 of 2 steps done"]);
+    // Beside the terminal, each step: the failed one with its exit status,
+    // and the result under it.
+    tui.wait_for(&["✗ Failing exit 9", "– Marker", "Result: exit 9"]);
     tui.keys("\r");
     tui.wait_for(&[
         "Not everything finished",
