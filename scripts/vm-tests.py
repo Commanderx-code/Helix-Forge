@@ -976,6 +976,22 @@ def flatpak_bundle(machine, shots):
         machine.relaunch()
 
 
+def migrate_flatpak(machine, shots):
+    """A Flatpak goes into a migration as itself, and comes back from
+    Flathub when the migration is applied on a machine without it."""
+    app = 'org.flycast.Flycast'
+    machine.ssh('./helix-toolbox migrate export migration.toml')
+    if f'"{app}"' not in machine.ssh('cat migration.toml').stdout:
+        raise RuntimeError(f'{app} is not in the migration as a Flatpak')
+    machine.ssh(f'sudo flatpak uninstall -y --noninteractive {app} >/dev/null')
+    shown = machine.ssh('./helix-toolbox migrate show migration.toml').stdout
+    if not re.search(rf'^  {re.escape(app)} +Flatpak +Flathub$', shown, re.M):
+        raise RuntimeError(f'{app} is not to be installed from Flathub:\n{shown}')
+    machine.ssh('yes | ./helix-toolbox migrate apply migration.toml --yes')
+    machine.ssh(f'flatpak info {app} >/dev/null && flatpak run --command=true {app}')
+    log(f'migration: {app} exported, removed and brought back from Flathub')
+
+
 # A notify-send that writes down what it was asked to show.
 NOTIFY_SEND = """#!/bin/sh
 [ "$1" = --help ] && exit 0
@@ -1195,8 +1211,9 @@ CASES = {
              ('plymouth-off', plymouth_off), ('apparmor', apparmor), ('sddm', sddm), ('enable-ssd-trim', ssd_trim),
              ('bootable-usb-creator', bootable_usb)],
     # Flatpak's runtimes take as long to download as the other cases take to
-    # run, so the Flatpak bundle has a machine of its own.
-    'arch-bundle': [('bundle-flatpak', flatpak_bundle)],
+    # run, so the Flatpak bundle, and a migration of the same Flatpak, have a
+    # machine of their own.
+    'arch-bundle': [('bundle-flatpak', flatpak_bundle), ('migrate-flatpak', migrate_flatpak)],
     # Every other GRUB theme, Garuda's from its own repository; the Chris
     # Titus Tech themes on a second machine, so the two halves run at once.
     'arch-themes': [(entry, grub_theme_case(entry)) for entry in (
@@ -1228,7 +1245,7 @@ CASES = {
 # Cases with nothing for verify to check afterward: not catalog entries,
 # or an installation whose live system is gone once it finishes.
 NOT_ENTRIES = {'bundle-flatpak', 'bundle-zypper', 'update-notifications', 'arch-server-setup',
-               'services-and-storage', 'recovery-and-restores', 'snapshot-check'}
+               'services-and-storage', 'recovery-and-restores', 'snapshot-check', 'migrate-flatpak'}
 
 
 def verify(machine, entry):
