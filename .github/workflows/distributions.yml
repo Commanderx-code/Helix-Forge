@@ -662,6 +662,59 @@ jobs:
         run: |
           printf 'name = "Fail"\n\n[command]\nline = "exit 7"\n' > /dev/null
           ! bin/helix-toolbox run definitely-not-an-entry --yes
+      - name: A repository staged, committed, branched, stashed and synced for real, and a task run
+        run: |
+          export GIT_AUTHOR_NAME=CI GIT_AUTHOR_EMAIL=ci@example.com GIT_COMMITTER_NAME=CI GIT_COMMITTER_EMAIL=ci@example.com
+          # Under ~/projects, one of the folders looked in by default.
+          repo="$HOME/projects/sample"
+          mkdir -p "$repo"
+          git -C "$repo" init -q -b main
+          printf 'one\n' > "$repo/one.txt"
+          bin/helix-toolbox repos | tee repos.txt
+          grep -q '^  sample ' repos.txt
+          bin/helix-toolbox repos stage sample one.txt --yes
+          [ "$(git -C "$repo" diff --cached --name-only)" = one.txt ]
+          bin/helix-toolbox repos commit sample -m First --yes
+          [ "$(git -C "$repo" log -1 --format=%s)" = First ]
+          bin/helix-toolbox repos branch sample topic --create --yes
+          [ "$(git -C "$repo" branch --show-current)" = topic ]
+          printf 'changed\n' > "$repo/one.txt"
+          if bin/helix-toolbox repos branch sample main --yes 2> refused.txt; then
+            echo "a branch was switched over changes" >&2
+            exit 1
+          fi
+          grep -q 'has changes' refused.txt
+          bin/helix-toolbox repos stash sample -m Aside --yes
+          [ "$(cat "$repo/one.txt")" = one ]
+          bin/helix-toolbox repos stash-apply sample 'stash@{0}' --yes
+          [ "$(cat "$repo/one.txt")" = changed ]
+          [ "$(git -C "$repo" stash list | wc -l)" -eq 1 ]
+          git -C "$repo" checkout -q -- one.txt
+          bin/helix-toolbox repos branch sample main --yes
+          # A bare remote: the branch published, a commit from another clone
+          # fetched and pulled, and one of this repository's pushed.
+          git init -q --bare -b main "$HOME/remote.git"
+          git -C "$repo" remote add origin "$HOME/remote.git"
+          bin/helix-toolbox repos publish sample --yes
+          git clone -q "$HOME/remote.git" "$HOME/other"
+          printf 'two\n' > "$HOME/other/two.txt"
+          git -C "$HOME/other" add two.txt
+          git -C "$HOME/other" commit -q -m Second
+          git -C "$HOME/other" push -q
+          bin/helix-toolbox repos fetch sample --yes
+          bin/helix-toolbox repos pull sample --yes
+          [ "$(git -C "$repo" log -1 --format=%s)" = Second ]
+          printf 'three\n' > "$repo/three.txt"
+          bin/helix-toolbox repos stage sample --all --yes
+          bin/helix-toolbox repos commit sample -m Third --yes
+          bin/helix-toolbox repos push sample --yes
+          [ "$(git -C "$HOME/remote.git" log -1 --format=%s main)" = Third ]
+          bin/helix-toolbox --json repos show sample > repository.json
+          python3 -c 'import json; d = json.load(open("repository.json"))["data"]; assert d["summary"]["upstream"] == "origin/main" and d["summary"]["ahead"] == 0 and not d["files"], d'
+          # A task of the user's, run in the repository's folder.
+          bin/helix-toolbox repos task-add sample where 'sh -c "pwd > ran.txt"'
+          bin/helix-toolbox repos task sample where --yes
+          [ "$(cat "$repo/ran.txt")" = "$repo" ]
       - name: Installer tests under this distribution's shell
         run: |
           ls -l /bin/sh
