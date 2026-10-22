@@ -152,7 +152,7 @@ impl Shown {
     fn progress_line(&self, width: u16, theme: Theme) -> Line<'static> {
         let total = self.steps.len();
         let ended = self.ended.min(total);
-        let count = format!(" {ended} of {total} steps");
+        let count = format!(" {ended} of {total} steps ended");
         let bar = usize::from(width).saturating_sub(count.chars().count());
         let filled = (bar * ended).checked_div(total).unwrap_or(0);
         let failed = self
@@ -665,7 +665,7 @@ mod tests {
         );
         let theme = Theme::default();
         let progress = text(&shown.progress_line(30, theme));
-        assert!(progress.ends_with(" 3 of 3 steps"), "{progress}");
+        assert!(progress.ends_with(" 3 of 3 steps ended"), "{progress}");
         assert_eq!(progress.chars().count(), 30);
         let list = format!("{:?}", shown.step_list(Rect::new(0, 0, 24, 5), theme));
         assert!(

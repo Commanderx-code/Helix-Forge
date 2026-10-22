@@ -1937,9 +1937,16 @@ impl App {
             Screen::Settings => self.draw_settings(frame, main),
         }
         match &mut self.popup {
-            // The keys are wider than the screen beside the sidebar.
+            // The keys are wider than the screen beside the sidebar; under
+            // the header, which the banner's picture stays drawn over.
             Some(Popup::Text(popup)) if popup.title() == "Keys" => {
-                popup.draw(frame, centered(area, 96, 96), self.theme)
+                let below = Rect::new(
+                    area.x,
+                    rows[1].y,
+                    area.width,
+                    rows[1].height + rows[2].height,
+                );
+                popup.draw(frame, centered(below, 98, 98), self.theme)
             }
             Some(Popup::Text(popup) | Popup::HardwareReport(popup, _)) => {
                 popup.draw(frame, centered(main, 95, 95), self.theme)
@@ -2598,12 +2605,23 @@ impl App {
             })
             .bold();
         let icon = Span::styled(icon, Style::default().fg(self.theme.focused()));
+        // The chevron takes the last two columns.
+        let text = Rect::new(
+            inner.x,
+            inner.y,
+            inner.width.saturating_sub(2),
+            inner.height,
+        );
+        let room = usize::from(text.width);
         let lines = if inner.height >= 2 {
             vec![
                 Line::from(vec![icon, Span::styled(title.to_string(), title_style)]),
                 Line::from(vec![
-                    Span::raw(indent),
-                    Span::styled(detail.to_string(), Style::default().fg(self.theme.muted())),
+                    Span::raw(indent.clone()),
+                    Span::styled(
+                        clip(detail, room.saturating_sub(indent.chars().count())),
+                        Style::default().fg(self.theme.muted()),
+                    ),
                 ]),
             ]
         } else {
@@ -2611,17 +2629,17 @@ impl App {
                 icon,
                 Span::styled(title.to_string(), title_style),
                 Span::styled(
-                    format!("   {detail}"),
+                    format!(
+                        "   {}",
+                        clip(
+                            detail,
+                            room.saturating_sub(indent.chars().count() + title.chars().count() + 3)
+                        )
+                    ),
                     Style::default().fg(self.theme.muted()),
                 ),
             ])]
         };
-        let text = Rect::new(
-            inner.x,
-            inner.y,
-            inner.width.saturating_sub(2),
-            inner.height,
-        );
         frame.render_widget(Paragraph::new(Text::from(lines)), text);
         frame.render_widget(
             Paragraph::new(Line::styled(
@@ -12368,6 +12386,24 @@ fn strip_escapes(text: &str) -> String {
     result
 }
 
+/// `text` cut to `width` columns at a word, with an ellipsis when it is cut.
+fn clip(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        return text.to_string();
+    }
+    let room = width.saturating_sub(1);
+    let cut: String = text.chars().take(room).collect();
+    let at_word = match cut.rfind(' ') {
+        Some(space) if space > room / 2 => cut[..space].trim_end().to_string(),
+        _ => cut,
+    };
+    if width == 0 {
+        String::new()
+    } else {
+        format!("{at_word}…")
+    }
+}
+
 /// Draw a list in a card with the main selection, and note where its
 /// items are, inside the border, for the mouse.
 fn bordered_list(
@@ -12386,6 +12422,17 @@ fn bordered_list(
 mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn clipped_text_ends_at_a_word() {
+        assert_eq!(
+            clip("Search and install entries", 40),
+            "Search and install entries"
+        );
+        assert_eq!(clip("Search and install entries", 16), "Search and…");
+        assert_eq!(clip("Supercalifragilistic", 8), "Superca…");
+        assert_eq!(clip("anything", 0), "");
+    }
 
     fn app() -> App {
         let args = TuiArgs {
