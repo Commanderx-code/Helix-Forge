@@ -24,6 +24,31 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   carry) is left out with a note, and the next source is used, or the plan
   says the entry cannot run here.
 
+## v1.23.0
+
+- **41 more tools in the catalog**, each installed by the distribution's own
+  package manager, or Flathub where that is how the app ships:
+  - Terminal tools: bat, eza, fd, zoxide, broot, trash-cli, ncdu, duf, dust,
+    tmux, tealdeer (tldr), jq and hyperfine.
+  - Developer tools: the GitHub CLI, delta, Distrobox, DBeaver and Podman
+    Desktop.
+  - Monitoring: Fastfetch, procs, nvtop, bottom and Mission Center.
+  - Design tools: Kdenlive and Shotcut.
+  - New groups: Media (VLC, mpv, Spotify), Notes (Obsidian, Joplin) and
+    Utilities (KeePassXC, Bitwarden, Syncthing, LocalSend, Flameshot,
+    qBittorrent, Flatseal, Warehouse).
+  - Security: ClamAV, Fail2ban and OpenSnitch.
+  - Each offers removal too.
+- **A Terminal Power User profile**: bat, eza, fd, ripgrep, fzf, zoxide,
+  tmux, btop, jq, tealdeer, delta and the GitHub CLI, as one plan.
+- **Every package name is checked on every distribution.** The
+  Distributions workflow looks up each name the catalog gives Arch, Debian
+  and Ubuntu, Fedora and openSUSE in that container's repositories, and the
+  known gaps (Ubuntu 22.04 and 24.04 lack some newer tools) are listed in
+  `tests/package-gaps.txt`, which must stay accurate. It found three names
+  that were wrong: Fedora's Ardour is `ardour9` and its OpenShot `openshot`,
+  and no distribution packages gopher64, which now comes from Flathub.
+
 ## v1.22.2
 
 - **A round logo on the Dashboard.** The emblem inside the rings is the logo
