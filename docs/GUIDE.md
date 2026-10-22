@@ -262,6 +262,14 @@ to run Home Manager. Each change is checked and shown side by side before
 it is saved, and the file before it is kept, so `Enter` on a backup puts
 it back.
 
+## Home Manager
+
+**Home Manager** shows which generation is active and which of your
+configuration files it links, so you know to change those in the
+configuration. `b` builds it first to see that it builds, `s` switches,
+and when a switch went wrong, `Enter` on the generation before it goes
+back. Settings also turns the timed restic backup on and off.
+
 ## A machine without internet
 
 On a machine of the same distribution that is online, `helix-toolbox bundle

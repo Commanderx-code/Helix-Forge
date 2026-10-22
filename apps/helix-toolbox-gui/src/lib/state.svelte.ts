@@ -25,6 +25,7 @@ export type Screen =
   | { kind: 'restic' }
   | { kind: 'repositories' }
   | { kind: 'configs' }
+  | { kind: 'home-manager' }
   | { kind: 'hardware' }
   | { kind: 'bundles' }
   | { kind: 'desktop' }

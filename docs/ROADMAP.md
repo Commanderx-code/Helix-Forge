@@ -73,6 +73,9 @@ The items:
       saved as a reviewed plan that keeps a backup and refuses a file
       changed since it was read; changed, refused and put back for real in
       the distribution containers
+- [x] Home Manager: the configuration, its generations and the active one,
+      its repository and the files it links; build, switch, going back to
+      a generation and pulling the repository as reviewed plans
 
 ## v1.19.0: moving machines
 

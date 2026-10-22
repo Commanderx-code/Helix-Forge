@@ -120,6 +120,21 @@ if grep -q bogus "${2#--config-file=}"; then
 fi
 EOF
 chmod +x "$work/bin/ghostty"
+# A stand-in home-manager for the Home Manager screen, with a flake where
+# Home Manager looks by itself: two generations, the earlier one not in
+# this machine's store; builds and switches are only reviewed.
+cat > "$work/bin/home-manager" <<EOF
+#!/bin/sh
+echo "\$*" >> "$work/home-manager.log"
+case "\$1" in
+    --version) echo 26.11-pre ;;
+    generations) printf '%s\n' '2026-10-20 12:01 : id 201 -> /nix/store/aaa-home-manager-generation (current)' \
+        '2026-10-16 13:23 : id 200 -> /nix/store/no-such-home-manager-generation' ;;
+esac
+EOF
+chmod +x "$work/bin/home-manager"
+mkdir -p "$work/home/.config/home-manager"
+printf '{ }\n' > "$work/home/.config/home-manager/flake.nix"
 # The marker fixture writes here, which shows the run really ran.
 export HELIX_TOOLBOX_TEST_OUT="$work/marker.txt"
 # WebKitGTK on a virtual display: no GPU, no compositor.
@@ -210,6 +225,11 @@ fi
 set -- "$work/config/ghostty/config.helix-toolbox-backup-"*
 if ! grep -qx 'font-size = 12' "$1" 2>/dev/null; then
     echo "the Ghostty configuration before the save was not kept" >&2
+    exit 1
+fi
+# Home Manager was only asked to read.
+if grep -E "^(build|switch)" "$work/home-manager.log" 2>/dev/null; then
+    echo "home-manager was asked to build or switch" >&2
     exit 1
 fi
 # The hardware report's issue went to the browser, filled in.

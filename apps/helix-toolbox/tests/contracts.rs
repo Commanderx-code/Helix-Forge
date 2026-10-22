@@ -109,7 +109,7 @@ fn json_shapes_only_gain_fields() {
         "font-size = 11\n",
     )
     .unwrap();
-    let commands: [(&str, &[&str]); 22] = [
+    let commands: [(&str, &[&str]); 24] = [
         ("system", &["system"]),
         ("list", &["list"]),
         ("search", &["search", "marker"]),
@@ -132,7 +132,13 @@ fn json_shapes_only_gain_fields() {
         ("restic-baselines", &["restic", "baseline"]),
         ("config", &["config", "ghostty"]),
         ("config-history", &["config", "ghostty", "history"]),
+        ("home-manager", &["home-manager"]),
+        ("home-manager-generations", &["home-manager", "generations"]),
     ];
+    // A Home Manager configuration where Home Manager looks by itself, so
+    // its shape is in the saved one.
+    fs::create_dir_all(home.path().join(".config/home-manager")).unwrap();
+    fs::write(home.path().join(".config/home-manager/flake.nix"), "{ }\n").unwrap();
     let mut problems = Vec::new();
     for (name, args) in commands {
         let now = shape(&json(home.path(), args));

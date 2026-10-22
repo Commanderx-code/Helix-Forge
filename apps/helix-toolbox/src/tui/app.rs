@@ -21,7 +21,7 @@ use helix_toolbox_engine::{
     EngineError, Machine, Plan, Probe, backups, bundle,
     configs::{self, Checked},
     confirmation::{self, Prepared},
-    doctor, drift, hardware_report, history,
+    doctor, drift, hardware_report, history, home_manager,
     inventory::{Inventory, Status, which},
     migration::{self, Standing, Translation},
     notifications,
@@ -93,8 +93,7 @@ Areas (Applications and the other catalog screens)
   u                 update the entry             U           update every entry with an update
   g                 flags guide     *   pin a favorite     i   show all, installed or updates
 
-Install Plan
-  Enter run it   x / Delete remove an entry   c clear it   s save as a profile   e what it changes
+Install Plan   Enter run it   x / Del remove one   c clear   s save as a profile   e what it changes
 
 History, Backups, Doctor, Hardware, Desktop, Updates, Drift, Reliability, Settings
   Enter             log / restore / details / change   r   reload or check again; f repair; u / U update
@@ -104,8 +103,9 @@ History, Backups, Doctor, Hardware, Desktop, Updates, Drift, Reliability, Settin
   Reliability: i    critical or untested only    v   trust;  w (and History)  report it worked here
   Services: s start/stop  e enable/disable  R restart  i which  f filter   Storage: Enter cleans
   Performance: b an earlier boot  Enter acts on a hint   Recovery: c check snapshots  f set up
-  Migration: e export  o open a file  a install    Restic: b back up  c check  s a file's history
-  Restic: Enter browse  R restore  n baseline  v test it  w timer   Configs: Enter change  E editor
+  Migration: e export  o open  a install   Home Manager: b build  s switch  Enter go back  p pull
+  Restic: Enter browse  R restore  b back up  c check  s history  n baseline  v test it  w timer
+  Configs: Enter change a field or put a backup back   E your editor on the whole file
   Repositories: Enter open/diff/run  Space stage  c commit  b branch  s stash  F p P sync
 
 Running window
@@ -152,6 +152,8 @@ enum Screen {
     Repositories,
     /// Ghostty's and Fastfetch's configuration, changed and saved as a plan.
     Configs,
+    /// Home Manager's generations, building and switching.
+    HomeManager,
     Settings,
 }
 
@@ -262,6 +264,17 @@ pub struct EditRequest {
 
 /// A migration file read here, or why it could not be.
 type MigrationOpened = (PathBuf, Result<Translation, String>);
+
+/// A line of the Home Manager screen.
+#[derive(Clone, Debug)]
+enum HomeRow {
+    Heading(String),
+    Text(String),
+    /// A generation, by its place in the status.
+    Generation(usize),
+    /// A linked configuration file, by its place in the status.
+    Link(usize),
+}
 
 /// A line of the Restic screen.
 #[derive(Clone, Debug)]
@@ -779,6 +792,10 @@ pub struct App {
     migration_opened: Option<(PathBuf, Translation)>,
     opening_migration: Option<mpsc::Receiver<MigrationOpened>>,
     migration_rows: Vec<MigrationRow>,
+    /// Home Manager as last read, and the screen's lines.
+    home_status: Option<home_manager::Status>,
+    reading_home: Option<mpsc::Receiver<home_manager::Status>>,
+    home_rows: Vec<HomeRow>,
     /// The restic repository as last read, and the screen's lines.
     restic_reading: Option<ResticReading>,
     reading_restic: Option<mpsc::Receiver<ResticReading>>,
@@ -923,6 +940,9 @@ impl App {
             migration_opened: None,
             opening_migration: None,
             migration_rows: Vec::new(),
+            home_status: None,
+            reading_home: None,
+            home_rows: Vec::new(),
             restic_reading: None,
             reading_restic: None,
             restic_browse: None,
@@ -1198,6 +1218,7 @@ impl App {
             Screen::Restic => self.restic_rows.len(),
             Screen::Repositories => self.repo_rows.len(),
             Screen::Configs => self.config_rows.len(),
+            Screen::HomeManager => self.home_rows.len(),
             Screen::Doctor => self.diagnoses.len() + self.doctor_entries().len(),
             Screen::Settings => self.settings().len(),
         }
@@ -1294,6 +1315,13 @@ impl App {
                 self.build_migration_rows();
             }
         }
+        if screen == Screen::HomeManager {
+            if self.home_status.is_none() {
+                self.read_home();
+            } else {
+                self.build_home_rows();
+            }
+        }
         if screen == Screen::Restic {
             if self.restic_reading.is_none() {
                 self.read_restic();
@@ -1373,6 +1401,18 @@ impl App {
                     return true;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => self.reading_migration = None,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if let Some(receiver) = &self.reading_home {
+            match receiver.try_recv() {
+                Ok(found) => {
+                    self.home_status = Some(found);
+                    self.reading_home = None;
+                    self.build_home_rows();
+                    return true;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => self.reading_home = None,
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
@@ -1543,6 +1583,7 @@ impl App {
             Screen::Restic => Icon::Restic,
             Screen::Repositories => Icon::Repositories,
             Screen::Configs => Icon::Configs,
+            Screen::HomeManager => Icon::HomeManager,
             Screen::Favorites => Icon::Favorites,
             Screen::Doctor => Icon::Doctor,
             Screen::Settings => Icon::Settings,
@@ -1628,6 +1669,7 @@ impl App {
             Screen::Restic => self.draw_restic(frame, main),
             Screen::Repositories => self.draw_repos(frame, main),
             Screen::Configs => self.draw_configs(frame, main),
+            Screen::HomeManager => self.draw_home(frame, main),
             Screen::Doctor => self.draw_doctor(frame, main),
             Screen::Settings => self.draw_settings(frame, main),
         }
@@ -2713,6 +2755,10 @@ impl App {
                     Some(_) => "no".to_string(),
                 },
             ),
+            (
+                "Back up with restic on a timer".to_string(),
+                self.restic_timer_label(),
+            ),
             ("Setup wizard".to_string(), "Enter opens it".to_string()),
             (
                 "Bug report, to paste into an issue".to_string(),
@@ -3137,6 +3183,7 @@ impl App {
                 }
                 Screen::Repositories => self.repo_hints(&mut list),
                 Screen::Configs => self.config_hints(&mut list),
+                Screen::HomeManager => self.home_hints(&mut list),
                 Screen::Settings => list.push(Hint::new(&["Enter"], "Change")),
             },
         }
@@ -3384,6 +3431,9 @@ impl App {
                     }
                     if self.screen == Screen::Repositories {
                         self.reload_repos();
+                    }
+                    if self.screen == Screen::HomeManager {
+                        self.read_home();
                     }
                 }
                 return true;
@@ -4021,6 +4071,7 @@ impl App {
             },
             Screen::Repositories => self.repo_key(key.code),
             Screen::Configs => self.config_key(key.code),
+            Screen::HomeManager => self.home_key(key.code),
             Screen::Bundles => match key.code {
                 KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Char('l') | KeyCode::Right => {
                     self.bundle_enter()
@@ -6191,8 +6242,18 @@ impl App {
                     watch.drift = slugs.get(next).cloned();
                 })
             }
-            9 => self.open_wizard(false),
-            10 => self.make_report(),
+            // Off, every day, every week, then off again.
+            9 if self.examine_here => {
+                let units = restic::units_here();
+                let next = match units.as_deref().and_then(restic::timer) {
+                    None => Some(restic::Every::Day),
+                    Some(restic::Every::Day) => Some(restic::Every::Week),
+                    Some(restic::Every::Week) => None,
+                };
+                self.set_restic_timer(next);
+            }
+            10 => self.open_wizard(false),
+            11 => self.make_report(),
             _ => {}
         }
     }
@@ -7485,6 +7546,22 @@ impl App {
         }
     }
 
+    /// The restic repository for the recovery checks, with its newest
+    /// snapshot when the Restic screen read them already.
+    fn restic_repository(&self) -> Option<recovery::Repository> {
+        let reading = self.restic_reading.as_ref();
+        match reading.map(|reading| &reading.found) {
+            Some(restic::Found::Ready(config)) => Some(recovery::Repository {
+                name: config.repository.clone(),
+                newest: reading
+                    .and_then(|reading| reading.snapshots.as_ref().ok()?.first())
+                    .map(restic::Snapshot::when),
+            }),
+            Some(_) => None,
+            None => restic::repository_here(),
+        }
+    }
+
     fn reload_recovery(&mut self) {
         if self.examine_here {
             let found_backups = backups::discover(&backups::Roots::here());
@@ -7498,6 +7575,7 @@ impl App {
                     backups: &found_backups,
                     baselines: &baselines,
                     now: history::now(),
+                    restic: self.restic_repository(),
                 },
             );
         }
@@ -7872,6 +7950,323 @@ impl App {
         frame.render_stateful_widget(list, inner, &mut self.main_state);
     }
 
+    // ----- Home Manager -----
+
+    /// Read Home Manager in the background: its generations, its
+    /// configuration's repository and the files it links.
+    fn read_home(&mut self) {
+        if !self.examine_here {
+            self.build_home_rows();
+            return;
+        }
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(home_manager::status(&doctor::Here, &repos::Here));
+        });
+        self.reading_home = Some(receiver);
+        self.build_home_rows();
+    }
+
+    fn selected_generation(&self) -> Option<&home_manager::Generation> {
+        let HomeRow::Generation(index) = self.home_rows.get(self.main_state.selected()?)? else {
+            return None;
+        };
+        self.home_status.as_ref()?.generations.get(*index)
+    }
+
+    fn selected_link(&self) -> Option<&home_manager::Link> {
+        let HomeRow::Link(index) = self.home_rows.get(self.main_state.selected()?)? else {
+            return None;
+        };
+        self.home_status.as_ref()?.links.get(*index)
+    }
+
+    /// The configuration to build, or a popup saying why there is none.
+    fn home_config(&mut self) -> Option<home_manager::Config> {
+        let why = match self.home_status.as_ref() {
+            None => "Home Manager has not been read yet; r reads it.".to_string(),
+            Some(status) if !status.installed => "home-manager is not installed here.".to_string(),
+            Some(home_manager::Status {
+                config: Some(config),
+                ..
+            }) => return Some(config.clone()),
+            Some(home_manager::Status {
+                problem: Some(problem),
+                ..
+            }) => problem.clone(),
+            Some(_) => "No Home Manager configuration was found: name its folder as flake under [home_manager] in settings.toml.".to_string(),
+        };
+        self.popup = Some(Popup::Text(TextPopup::new("Home Manager", why, true)));
+        None
+    }
+
+    fn confirm_home(&mut self, planned: Result<Plan, String>) {
+        match planned {
+            Ok(planned) => self.confirm_plan(Ok(planned)),
+            Err(why) => {
+                self.popup = Some(Popup::Text(TextPopup::new("Cannot plan", why, true)));
+            }
+        }
+    }
+
+    fn home_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Char('b') => {
+                if let Some(config) = self.home_config() {
+                    self.confirm_home(Ok(home_manager::plan_build(&config)));
+                }
+            }
+            KeyCode::Char('s') => {
+                if let Some(config) = self.home_config() {
+                    self.confirm_home(Ok(home_manager::plan_switch(&config)));
+                }
+            }
+            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.home_enter(),
+            KeyCode::Char('p') => self.pull_home(),
+            KeyCode::Char('d') => self.describe_home(),
+            KeyCode::Char('r') => self.read_home(),
+            KeyCode::Char('h') | KeyCode::Left => self.focus = Focus::Sidebar,
+            _ => {}
+        }
+    }
+
+    /// Enter on an earlier generation plans going back to it; on anything
+    /// else it tells of it.
+    fn home_enter(&mut self) {
+        match self.selected_generation().cloned() {
+            Some(generation) if !generation.current => {
+                let planned = home_manager::plan_activate(&doctor::Here, &generation);
+                self.confirm_home(planned);
+            }
+            _ => self.describe_home(),
+        }
+    }
+
+    /// Pull the configuration's repository, fast-forward only.
+    fn pull_home(&mut self) {
+        if self.home_config().is_none() {
+            return;
+        }
+        let Some(repository) = self
+            .home_status
+            .as_ref()
+            .and_then(|status| status.repository.clone())
+        else {
+            self.popup = Some(Popup::Text(TextPopup::new(
+                "Home Manager",
+                "The configuration is not in a Git repository.",
+                true,
+            )));
+            return;
+        };
+        if !self.examine_here {
+            return;
+        }
+        let planned = repos::details(&repos::Here, &repository.path)
+            .and_then(|details| repos::plan(&repos::Here, &details, &Change::Pull));
+        self.confirm_home(planned);
+    }
+
+    fn describe_home(&mut self) {
+        let (title, text) = if let Some(generation) = self.selected_generation() {
+            (
+                format!("Generation {}", generation.id),
+                format!(
+                    "Built {}.\n{}\n\n{}",
+                    generation.built,
+                    generation.path.display(),
+                    if generation.current {
+                        "It is the active one."
+                    } else {
+                        "Enter goes back to it through its own activate script, after you review the plan."
+                    }
+                ),
+            )
+        } else if let Some(link) = self.selected_link() {
+            (
+                link.name.clone(),
+                match (&link.target, link.managed) {
+                    (Some(target), true) => format!(
+                        "{} links to {}.\n\nHome Manager manages it: change it in the configuration, then switch.",
+                        link.path.display(),
+                        target.display()
+                    ),
+                    (Some(target), false) => {
+                        format!("{} links to {}.", link.path.display(), target.display())
+                    }
+                    (None, _) => format!(
+                        "{} is a file of its own; Home Manager does not manage it.",
+                        link.path.display()
+                    ),
+                },
+            )
+        } else {
+            return;
+        };
+        self.popup = Some(Popup::Text(TextPopup::new(
+            helix_toolbox_core::printable(&title),
+            helix_toolbox_core::printable(&text),
+            true,
+        )));
+    }
+
+    fn home_hints(&self, list: &mut Vec<Hint>) {
+        list.push(Hint::new(&["↑↓"], "Navigate"));
+        if self
+            .selected_generation()
+            .is_some_and(|generation| !generation.current)
+        {
+            list.push(Hint::new(&["Enter"], "Go back to it"));
+        }
+        if let Some(status) = &self.home_status
+            && status.installed
+            && status.config.is_some()
+        {
+            list.push(Hint::new(&["b"], "Build"));
+            list.push(Hint::new(&["s"], "Switch"));
+            if status.repository.is_some() {
+                list.push(Hint::new(&["p"], "Pull"));
+            }
+        }
+        if self.selected_generation().is_some() || self.selected_link().is_some() {
+            list.push(Hint::new(&["d"], "Details"));
+        }
+        list.push(Hint::new(&["r"], "Read again"));
+    }
+
+    fn build_home_rows(&mut self) {
+        let mut rows = vec![HomeRow::Heading("Home Manager".into())];
+        let Some(status) = &self.home_status else {
+            rows.push(HomeRow::Text(if self.reading_home.is_some() {
+                "Reading Home Manager…".into()
+            } else {
+                "Press r to read Home Manager.".into()
+            }));
+            self.home_rows = rows;
+            self.clamp_main();
+            return;
+        };
+        rows.push(HomeRow::Text(match (&status.version, status.installed) {
+            (Some(version), _) => format!("Home Manager {version}"),
+            (None, true) => "Home Manager is installed".into(),
+            (None, false) => "home-manager is not installed here".into(),
+        }));
+        rows.push(HomeRow::Text(match (&status.config, &status.problem) {
+            (Some(config), _) => format!(
+                "Configuration: {} ({}, from {})",
+                config
+                    .flake_reference()
+                    .unwrap_or_else(|| config.folder.join("home.nix").display().to_string()),
+                if config.flake { "a flake" } else { "home.nix" },
+                config.origin.label()
+            ),
+            (None, Some(problem)) => format!("Configuration: {problem}"),
+            (None, None) => {
+                "No configuration found: name its folder as flake under [home_manager] in settings.toml".into()
+            }
+        }));
+        if let Some(repository) = &status.repository {
+            rows.push(HomeRow::Text(match &repository.problem {
+                Some(problem) => format!("Repository {}: {problem}", repository.path.display()),
+                None => format!(
+                    "Repository {}: {}, {} changed{}",
+                    repository.path.display(),
+                    repository.branch.as_deref().unwrap_or("detached"),
+                    repository.changed,
+                    match (repository.ahead, repository.behind) {
+                        (Some(ahead), Some(behind)) if ahead + behind > 0 => {
+                            format!(", {ahead} ahead and {behind} behind")
+                        }
+                        (Some(_), Some(_)) => ", up to date".to_string(),
+                        _ => String::new(),
+                    }
+                ),
+            }));
+        }
+        if !status.generations.is_empty() {
+            rows.push(HomeRow::Heading(format!(
+                "Generations ({})",
+                status.generations.len()
+            )));
+            rows.extend((0..status.generations.len()).map(HomeRow::Generation));
+        }
+        if !status.links.is_empty() {
+            rows.push(HomeRow::Heading("Configuration files".into()));
+            rows.extend((0..status.links.len()).map(HomeRow::Link));
+        }
+        self.home_rows = rows;
+        self.clamp_main();
+    }
+
+    fn draw_home(&mut self, frame: &mut Frame, area: Rect) {
+        let inner = self.page(
+            frame,
+            area,
+            "Home Manager",
+            "Its generations and configuration; building, switching and going back are plans you review.",
+        );
+        self.fill(frame, inner);
+        let focused = self.focus == Focus::Main;
+        let muted = Style::default().fg(self.theme.muted());
+        let mut items: Vec<Line> = Vec::new();
+        for row in &self.home_rows {
+            items.push(match row {
+                HomeRow::Heading(text) => {
+                    Line::styled(text.clone(), Style::default().fg(self.theme.group()).bold())
+                }
+                HomeRow::Text(text) => {
+                    Line::styled(format!("  {}", helix_toolbox_core::printable(text)), muted)
+                }
+                HomeRow::Generation(index) => {
+                    let generation = &self.home_status.as_ref().unwrap().generations[*index];
+                    Line::from(vec![
+                        Span::styled(
+                            format!("  {:>5}  {}", generation.id, generation.built),
+                            Style::default().fg(if generation.current {
+                                self.theme.success()
+                            } else {
+                                self.theme.entry()
+                            }),
+                        ),
+                        Span::styled(
+                            if generation.current {
+                                "  active".to_string()
+                            } else {
+                                String::new()
+                            },
+                            Style::default().fg(self.theme.success()),
+                        ),
+                    ])
+                }
+                HomeRow::Link(index) => {
+                    let link = &self.home_status.as_ref().unwrap().links[*index];
+                    Line::from(vec![
+                        Span::styled(
+                            format!("  {:<12}", link.name),
+                            Style::default().fg(self.theme.entry()),
+                        ),
+                        Span::styled(
+                            if link.managed {
+                                "linked by Home Manager".to_string()
+                            } else if link.target.is_some() {
+                                "a link of its own".to_string()
+                            } else {
+                                "a file of its own".to_string()
+                            },
+                            muted,
+                        ),
+                    ])
+                }
+            });
+        }
+        let list = List::new(items)
+            .block(self.card("Home Manager"))
+            .highlight_style(self.highlight(focused))
+            .highlight_symbol(self.marker(focused))
+            .scroll_padding(1);
+        frame.render_stateful_widget(list, inner, &mut self.main_state);
+    }
+
     // ----- Restic -----
 
     /// The repository, when one is set up and usable.
@@ -8189,27 +8584,54 @@ impl App {
         if !self.examine_here {
             return;
         }
-        let Some(config) = self.restic_config().cloned() else {
+        let on = restic::units_here().and_then(|units| restic::timer(&units));
+        self.set_restic_timer(if on.is_some() {
+            None
+        } else {
+            Some(restic::Every::Day)
+        });
+    }
+
+    /// The timed backup's state, for Settings.
+    fn restic_timer_label(&self) -> String {
+        if !self.examine_here {
+            return "not available here".to_string();
+        }
+        match restic::units_here().and_then(|units| restic::timer(&units)) {
+            Some(every) => format!("yes, {}", every.label()),
+            None if self.restic_config().is_some() || restic::repository_here().is_some() => {
+                "no".to_string()
+            }
+            None => "no (name a repository in Restic first)".to_string(),
+        }
+    }
+
+    /// Turn the timed backup off, or on to run that often.
+    fn set_restic_timer(&mut self, every: Option<restic::Every>) {
+        let config = self
+            .restic_config()
+            .cloned()
+            .or_else(|| match restic::here() {
+                restic::Found::Ready(config) => Some(config),
+                _ => None,
+            });
+        let Some(config) = config else {
             self.no_restic();
             return;
         };
         let said = (|| -> Result<String, String> {
             let units =
                 restic::units_here().ok_or("there is no home folder to keep the timer in")?;
-            if restic::timer(&units).is_some() {
+            let Some(every) = every else {
                 restic::timer_off(&units, &notifications::systemctl)?;
                 return Ok("The timed backup is off.".to_string());
-            }
+            };
             let program = std::env::current_exe().map_err(|error| error.to_string())?;
-            let started = restic::timer_on(
-                &units,
-                &program,
-                &config,
-                restic::Every::Day,
-                &notifications::systemctl,
-            )?;
+            let started =
+                restic::timer_on(&units, &program, &config, every, &notifications::systemctl)?;
             Ok(format!(
-                "The backup runs every day{}. helix-toolbox restic timer on --weekly runs it every week instead.",
+                "The backup runs {}{}. Settings, or w in Restic, change it.",
+                every.label(),
                 match started {
                     notifications::Started::Now => "",
                     notifications::Started::AtLogin => ", from the next login",
@@ -10492,6 +10914,11 @@ fn build_menu(catalog: &Catalog) -> Vec<MenuItem> {
         section: "MORE TOOLS",
     });
     menu.push(MenuItem {
+        label: "Home Manager".into(),
+        screen: Screen::HomeManager,
+        section: "MORE TOOLS",
+    });
+    menu.push(MenuItem {
         label: "Configs".into(),
         screen: Screen::Configs,
         section: "MORE TOOLS",
@@ -10860,7 +11287,7 @@ mod tests {
         app.reports_dir = Some(directory.path().to_path_buf());
         app.open_screen(Screen::Settings);
         app.focus = Focus::Main;
-        app.main_state.select(Some(10));
+        app.main_state.select(Some(11));
         assert!(screen(&mut app, 120, 40).contains("Bug report, to paste into an issue"));
         press(&mut app, KeyCode::Enter);
         assert!(screen(&mut app, 120, 40).contains("Gathering the report"));
@@ -13102,5 +13529,122 @@ mod tests {
         assert_eq!(timestamp(0), "1970-01-01 00:00 UTC");
         assert_eq!(timestamp(1_700_000_000), "2023-11-14 22:13 UTC");
         assert_eq!(strip_escapes("a\u{1b}[31mb\u{1b}[0m\r\n"), "ab\n");
+    }
+
+    /// Home Manager as the tests' screens see it: a flake, two generations
+    /// and a configuration file it links.
+    fn home_status() -> home_manager::Status {
+        home_manager::Status {
+            installed: true,
+            version: Some("26.11-pre".into()),
+            config: Some(home_manager::Config {
+                folder: "/home/me/dotfiles/home-manager".into(),
+                flake: true,
+                profile: Some("me".into()),
+                origin: home_manager::Origin::Settings,
+            }),
+            problem: None,
+            generations: vec![
+                home_manager::Generation {
+                    id: 201,
+                    built: "2026-10-20 12:01".into(),
+                    path: "/nix/store/aaa-home-manager-generation".into(),
+                    current: true,
+                },
+                home_manager::Generation {
+                    id: 200,
+                    built: "2026-10-16 13:23".into(),
+                    path: "/nix/store/no-such-home-manager-generation".into(),
+                    current: false,
+                },
+            ],
+            repository: Some(Summary {
+                name: "dotfiles".into(),
+                path: "/home/me/dotfiles".into(),
+                branch: Some("main".into()),
+                changed: 2,
+                ahead: Some(1),
+                behind: Some(0),
+                ..Summary::default()
+            }),
+            links: vec![home_manager::Link {
+                name: "Ghostty".into(),
+                path: "/home/me/.config/ghostty/config".into(),
+                target: Some("/nix/store/xyz-home-manager-files/.config/ghostty/config".into()),
+                managed: true,
+            }],
+        }
+    }
+
+    #[test]
+    fn the_home_manager_screen_shows_generations_its_repository_and_links() {
+        let mut app = app();
+        app.home_status = Some(home_status());
+        app.open_screen(Screen::HomeManager);
+        app.focus = Focus::Main;
+        let shown = screen(&mut app, 140, 40);
+        for text in [
+            "Home Manager 26.11-pre",
+            "Configuration: /home/me/dotfiles/home-manager#me (a flake, from Helix Toolbox's settings)",
+            "Repository /home/me/dotfiles: main, 2 changed, 1 ahead and 0 behind",
+            "Generations (2)",
+            "201  2026-10-20 12:01  active",
+            "Ghostty",
+            "linked by Home Manager",
+            "b Build",
+            "p Pull",
+        ] {
+            assert!(shown.contains(text), "{text}: {shown}");
+        }
+        // d tells of the linked file.
+        let link = app
+            .home_rows
+            .iter()
+            .position(|row| matches!(row, HomeRow::Link(0)))
+            .unwrap();
+        app.main_state.select(Some(link));
+        press(&mut app, KeyCode::Char('d'));
+        assert!(screen(&mut app, 140, 40).contains("Home Manager manages it"));
+        // Not installed: building says so instead of planning.
+        press(&mut app, KeyCode::Esc);
+        app.home_status = Some(home_manager::Status::default());
+        app.build_home_rows();
+        press(&mut app, KeyCode::Char('b'));
+        assert!(screen(&mut app, 140, 40).contains("home-manager is not installed here"));
+    }
+
+    #[test]
+    fn the_home_manager_screen_reviews_build_switch_and_going_back() {
+        let mut app = app();
+        app.home_status = Some(home_status());
+        app.open_screen(Screen::HomeManager);
+        app.focus = Focus::Main;
+        press(&mut app, KeyCode::Char('b'));
+        assert!(matches!(app.popup, Some(Popup::Confirm(_))));
+        let shown = screen(&mut app, 160, 40);
+        assert!(
+            shown.contains("home-manager build --flake '/home/me/dotfiles/home-manager#me'"),
+            "{shown}"
+        );
+        press(&mut app, KeyCode::Char('n'));
+        assert!(!matches!(app.popup, Some(Popup::Running(_))));
+        press(&mut app, KeyCode::Char('s'));
+        assert!(matches!(app.popup, Some(Popup::Confirm(_))));
+        assert!(screen(&mut app, 160, 40).contains("home-manager switch --flake"));
+        press(&mut app, KeyCode::Char('n'));
+        // The earlier generation was collected: there is no script to run.
+        let earlier = app
+            .home_rows
+            .iter()
+            .position(|row| matches!(row, HomeRow::Generation(1)))
+            .unwrap();
+        app.main_state.select(Some(earlier));
+        press(&mut app, KeyCode::Enter);
+        assert!(screen(&mut app, 160, 40).contains("has no activate script"));
+        // Enter on the active one only tells of it.
+        press(&mut app, KeyCode::Esc);
+        app.main_state.select(Some(earlier - 1));
+        press(&mut app, KeyCode::Enter);
+        assert!(screen(&mut app, 160, 40).contains("It is the active one."));
     }
 }

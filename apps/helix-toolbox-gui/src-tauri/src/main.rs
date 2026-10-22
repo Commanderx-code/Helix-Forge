@@ -13,7 +13,7 @@ use helix_toolbox_engine::{
     confirmation::{self, Prepared},
     desktop, doctor, drift,
     execution::{Execution, Options},
-    hardware, hardware_report, history,
+    hardware, hardware_report, history, home_manager,
     inventory::{Inventory, which},
     migration::{self, Standing},
     notifications,
@@ -1425,6 +1425,7 @@ async fn read_recovery(app: AppHandle) -> Result<RecoveryView, String> {
                 backups: &found_backups,
                 baselines: &baselines,
                 now: history::now(),
+                restic: restic::repository_here(),
             },
         );
         RecoveryView {
@@ -2291,6 +2292,92 @@ async fn save_workspace(
     .await?
 }
 
+// Home Manager
+
+/// Home Manager, as `helix-toolbox home-manager --json` shows it.
+#[derive(Serialize)]
+struct HomeManagerView {
+    #[serde(flatten)]
+    status: home_manager::Status,
+    /// The `--flake` reference built, for a flake.
+    reference: Option<String>,
+    /// Where the configuration was named.
+    origin: Option<&'static str>,
+}
+
+/// Home Manager: its configuration, generations, repository and links.
+#[tauri::command]
+async fn read_home_manager(app: AppHandle) -> Result<HomeManagerView, String> {
+    blocking(app, |_| {
+        let status = home_manager::status(&doctor::Here, &repositories::Here);
+        HomeManagerView {
+            reference: status
+                .config
+                .as_ref()
+                .and_then(home_manager::Config::flake_reference),
+            origin: status.config.as_ref().map(|config| config.origin.label()),
+            status,
+        }
+    })
+    .await
+}
+
+/// A Home Manager plan to review: `build`, `switch`, `activate` (an
+/// earlier generation, by its number) or `pull` (its repository).
+#[tauri::command]
+async fn prepare_home_manager(
+    app: AppHandle,
+    action: String,
+    generation: Option<u32>,
+) -> Result<PreparedView, String> {
+    blocking(app, move |gui| {
+        let planned = (|| -> Result<Plan, String> {
+            let status = home_manager::status(&doctor::Here, &repositories::Here);
+            if !status.installed {
+                return Err("home-manager is not installed here.".into());
+            }
+            let config = match (&status.config, &status.problem) {
+                (Some(config), _) => config,
+                (None, Some(problem)) => return Err(problem.clone()),
+                (None, None) => {
+                    return Err("No Home Manager configuration was found: name its folder as flake under [home_manager] in settings.toml.".into());
+                }
+            };
+            match action.as_str() {
+                "build" => Ok(home_manager::plan_build(config)),
+                "switch" => Ok(home_manager::plan_switch(config)),
+                "activate" => {
+                    let wanted = generation.ok_or("no generation was chosen")?;
+                    let found = home_manager::find_generation(
+                        &status.generations,
+                        &wanted.to_string(),
+                    )?;
+                    home_manager::plan_activate(&doctor::Here, &found)
+                }
+                "pull" => {
+                    let repository = status
+                        .repository
+                        .as_ref()
+                        .ok_or("The configuration is not in a Git repository.")?;
+                    let details = repositories::details(&repositories::Here, &repository.path)?;
+                    repositories::plan(
+                        &repositories::Here,
+                        &details,
+                        &repositories::Change::Pull,
+                    )
+                }
+                other => Err(format!("{} is not a Home Manager plan", printable(other))),
+            }
+        })();
+        let catalog = gui.catalog.read().unwrap();
+        match planned {
+            Ok(planned) => prepare_plan(gui, &catalog, planned),
+            Err(why) => cannot(gui, why),
+        }
+    })
+    .await
+}
+
 // Hardware
 
 /// Firmware, disks, sensors, batteries and devices, read from this machine.
@@ -2713,6 +2800,10 @@ struct SettingsView {
     drift: Option<String>,
     /// The saved baselines to choose from: file name and name.
     baselines: Vec<(String, String)>,
+    /// How often the timed restic backup runs (`day`, `week`), or none.
+    restic_timer: Option<&'static str>,
+    /// Whether a restic repository is set up, so the timer can be.
+    restic_ready: bool,
 }
 
 #[tauri::command]
@@ -2742,6 +2833,13 @@ fn read_settings(gui: State<Gui>) -> SettingsView {
                     .collect()
             })
             .unwrap_or_default(),
+        restic_timer: restic::units_here()
+            .and_then(|units| restic::timer(&units))
+            .map(|every| match every {
+                restic::Every::Day => "day",
+                restic::Every::Week => "week",
+            }),
+        restic_ready: restic_ready().is_ok(),
     }
 }
 
@@ -2936,6 +3034,7 @@ fn main() {
                 read_restic, restic_files, restic_history, prepare_restic, record_baseline,
                 set_restic_timer,
                 read_repositories, read_repository, repository_diff, prepare_repository_change,
+                read_home_manager, prepare_home_manager,
                 prepare_task, save_workspace,
                 read_configs, validate_config, set_config_field, prepare_config_save,
                 prepare_config_restore,

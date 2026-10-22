@@ -23,6 +23,7 @@
   import Restic from './screens/Restic.svelte';
   import Repositories from './screens/Repositories.svelte';
   import Configs from './screens/Configs.svelte';
+  import HomeManager from './screens/HomeManager.svelte';
   import Hardware from './screens/Hardware.svelte';
   import Bundles from './screens/Bundles.svelte';
   import Desktop from './screens/Desktop.svelte';
@@ -86,6 +87,8 @@
         <Repositories />
       {:else if toolbox.screen.kind === 'configs'}
         <Configs />
+      {:else if toolbox.screen.kind === 'home-manager'}
+        <HomeManager />
       {:else if toolbox.screen.kind === 'hardware'}
         <Hardware />
       {:else if toolbox.screen.kind === 'bundles'}

@@ -28,6 +28,7 @@ pub enum Icon {
     Restic,
     Repositories,
     Configs,
+    HomeManager,
     Settings,
     Area,
     Group,
@@ -69,6 +70,7 @@ impl Icon {
                 Icon::Restic => "\u{f187}",         // archive
                 Icon::Repositories => "\u{f126}",   // code fork
                 Icon::Configs => "\u{f1de}",        // sliders
+                Icon::HomeManager => "\u{f015}",    // home
                 Icon::Settings => "\u{f013}",       // cog
                 Icon::Area => "\u{f07b}",           // folder
                 Icon::Group => "\u{f07b}",          // folder

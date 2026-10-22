@@ -363,6 +363,19 @@ first. `config <program> history` is `config-history`: `{kind, path,
 backups}`; `config <program> validate` is `config-validate`: `{kind,
 checked}`.
 
+## home-manager
+
+`home-manager`: `{installed, version, config, problem, generations,
+repository, links}`. `config` is `{folder, flake, profile, origin,
+reference}` or `null`, `origin` `settings`, `command-center` or `default`
+and `reference` the `--flake` argument (`null` for `home.nix`); `problem`
+says why a named configuration cannot be used. `generations` are `[{id,
+built, path, current}]`, newest first, `built` as Home Manager prints it;
+`repository` is the configuration's repository as `repos` lists one, or
+`null`; `links` are `[{name, path, target, managed}]`, `managed` when the
+file links into the Nix store. `home-manager generations` is
+`home-manager-generations`: `{generations}`.
+
 ## hardware_report
 
 `report --worked <entry>`: `{entries: [{id, name}], machine, system,

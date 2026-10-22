@@ -81,6 +81,9 @@ settings, profiles and history over ([what changed](https://github.com/Commander
 - **Repositories**: the Git repositories under your project folders, with
   their changes, diffs, branches and stashes, staged, committed and synced
   through reviewed plans, and each project's tasks run in its folder.
+- **Home Manager**: its generations and the active one, its
+  configuration's repository and the files it links, with build, switch
+  and going back to a generation as reviewed plans.
 - **Migration**: what this machine has, written to a file and read on
   another machine or distribution: catalog entries become that
   distribution's packages, Flatpaks come from Flathub, and the packages
