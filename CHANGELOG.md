@@ -18,6 +18,14 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   The virtual machine tests check Fedora's image against a digest pinned
   from its signed checksum, and take the other checksums only from their
   projects' own hosts.
+- **Installers no longer trust what other accounts can reach.** The Steam
+  mod installers (Starfield, Fallout 76, Arc Raiders and Diablo II) clone
+  into a new private folder on every run instead of reusing a fixed folder
+  in /tmp that another account could have made first, and Arc Raiders will
+  not make a symbolic link read-only. The Samba setup gives its share to the
+  Samba user with mode 0770 instead of making it, and everything already in
+  it, writable by every account. Full System Cleanup only empties logs
+  where no other account can swap their names.
 
 ## v1.21.0
 
