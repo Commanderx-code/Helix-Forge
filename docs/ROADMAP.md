@@ -59,6 +59,15 @@ The items:
       plans, a timer, and recovery tests against a recorded SHA-256;
       backed up, tested and restored for real in the distribution
       containers
+- [x] A Git repositories dashboard: the repositories under the project
+      folders with their branch, changes and upstream; one repository's
+      files, diffs, branches, stashes and commits; staging, commits,
+      branches, stashes, fetch, pull and push as reviewed plans checked
+      again when they run, and reading that never runs a repository's hooks
+      or filters
+- [x] Project workspaces: tasks found in `package.json`, Cargo, Makefiles
+      and justfiles without running them, your own kept with favorites in
+      `workspaces.toml`, each run in its folder after review
 
 ## v1.19.0: moving machines
 

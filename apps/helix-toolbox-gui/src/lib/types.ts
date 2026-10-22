@@ -471,3 +471,62 @@ export type BundleView = {
   flatpaks: string[];
   entries: BundledEntry[];
 };
+
+// Repositories
+
+/** One repository in the list, as `helix-toolbox repos --json`. */
+export type RepoSummary = {
+  name: string;
+  path: string;
+  branch: string | null;
+  changed: number;
+  upstream: string | null;
+  ahead: number | null;
+  behind: number | null;
+  last: string | null;
+  last_at: number | null;
+  origin: string | null;
+  problem: string | null;
+  favorite: boolean;
+  group: string;
+};
+
+export type ReposView = { roots: string[]; depth: number; origin: string; repositories: RepoSummary[] };
+
+export type RepoFile = { path: string; original: string | null; state: string; staged: boolean; unstaged: boolean; conflict: boolean };
+
+export type RepoTask = { id: string; name: string; command: string; shell: 'direct' | 'fish' | 'bash'; detected?: boolean };
+
+/** One repository, as `helix-toolbox repos show --json`, with its changes in words. */
+export type RepositoryView = {
+  summary: Omit<RepoSummary, 'favorite' | 'group'>;
+  changes: RepoFile[];
+  branches: string[];
+  remotes: string[];
+  stashes: { id: string; name: string; subject: string }[];
+  log: { hash: string; subject: string; at: number | null }[];
+  head: string | null;
+  branch_ref: string | null;
+  busy: string | null;
+  push_to: [string, string] | null;
+  staged_stat: string;
+  favorite: boolean;
+  tasks: RepoTask[];
+};
+
+export type RepoDiff = { text: string; truncated: boolean };
+
+/** A change to a repository, as `prepare_repository_change` takes it. */
+export type RepoChange =
+  | { kind: 'stage'; files: string[] }
+  | { kind: 'stage_all' }
+  | { kind: 'unstage'; files: string[] }
+  | { kind: 'commit'; message: string }
+  | { kind: 'create_branch'; name: string }
+  | { kind: 'switch_branch'; name: string }
+  | { kind: 'stash'; message: string; untracked: boolean }
+  | { kind: 'apply_stash'; id: string }
+  | { kind: 'fetch' }
+  | { kind: 'pull' }
+  | { kind: 'push' }
+  | { kind: 'publish'; remote: string };

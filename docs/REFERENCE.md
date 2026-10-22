@@ -546,6 +546,59 @@ did not write. `helix-toolbox restic` (`files <snapshot> [folder]`,
 `timer on|off [--weekly]`; plans with `--dry-run` and `--yes`, confirmed by
 typing BACKUP, CHECK, RESTORE or TEST) does the same.
 
+## Repositories
+
+**Repositories** lists the Git repositories under your project folders:
+`[repositories]` in `settings.toml` names them (`roots`, absolute or under
+`~/`, and `depth`, 1 to 6 folders down, 3 by default); without it, the
+folders Command Center was set up with, read only; else those of
+`~/github`, `~/projects`, `~/src`, `~/code` and `~/dotfiles` that exist. A
+folder holding `.git` is a repository, and is not looked into for more;
+`node_modules`, `target`, `.cache` and links are passed over. Each shows its
+branch, how many files changed, how it stands against its upstream and its
+latest commit; favorites (`f`) come first.
+
+Reading changes nothing: git runs with optional locks off, without the
+repository's hooks or file system monitor, with every content filter its
+settings name emptied (through `GIT_CONFIG_COUNT`, so any name is given
+back exactly), and without submodules' changes, each probe within 15
+seconds. A repository whose settings cannot be listed, or names a filter
+that cannot be named back, is not looked into; nor is any where git is
+older than 2.31.
+
+`Enter` opens a repository: its changed files (`Enter` shows a file's diff,
+staged and not; `Space` stages it, or unstages it when it is all staged;
+`A` stages every change), its branches (`Enter` switches; `b` creates one
+and switches to it), its stashes (`s` stashes the changes, new files too;
+`Enter` applies one with its index, keeping it), its tasks and its recent
+commits. `c` commits what is staged, `F` fetches every remote, `p` pulls,
+fast-forward only, and `P` pushes to the upstream, never forcing, or
+publishes the branch to `origin` when it has none. Each is a plan, reviewed
+first, that checks again when it runs: a commit that what is staged, HEAD
+and the branch are as reviewed and nothing is under way; a branch switch,
+a pull and a stash applied that the repository has no changes. A
+repository in the middle of a merge, rebase, cherry-pick or revert is left
+to git. Network steps ask for no password: a remote that needs one fails.
+The repository's hooks and commit signing run as they do with git.
+
+Tasks are found in the repository's manifests, which are read, never run:
+`package.json` scripts (`build`, `test`, `dev`, `lint`, `check`, `start`),
+Cargo (`build`, `test`, `check`, `run`), a Makefile's `all`, `build`,
+`test`, `check` and `lint` and a justfile's `build`, `test`, `check`,
+`lint`, `run` and `dev`. `n` keeps a command of your own as a task, in
+`workspaces.toml` beside the settings, with your favorites; `x` removes it.
+`Enter` runs a task in the repository's folder after you review it, its
+command split into words and run as it is, or with fish or bash when you
+say so (`--shell`).
+
+`helix-toolbox repos` (`show`, `diff [file] [--staged]`, `stage [files] |
+--all`, `unstage`, `commit -m`, `branch [--create]`, `stash [-m]
+[--untracked]`, `stash-apply`, `fetch`, `pull`, `push`, `publish [remote]`,
+`tasks`, `task`, `task-add`, `task-remove`, `favorite [--off]`, `group`; a
+repository by its name, or its path when names repeat; changes with
+`--dry-run` and `--yes`, confirmed by typing GIT, a task by typing TASK)
+does the same.
+
 ## Reliability and trust
 
 **Reliability** lists every entry with how far it has been tested, the
@@ -667,6 +720,8 @@ helix-toolbox recovery                   # snapshots, kernels, backups; --check-
 helix-toolbox migrate export [file]      # what this machine has, to take to another
 helix-toolbox migrate show <file>        # what a migration means here; migrate apply installs it
 helix-toolbox restic                     # the repository and its snapshots; history, restore, test
+helix-toolbox repos                      # the Git repositories under your project folders
+helix-toolbox repos show <repo>          # its changes, branches, stashes, commits and tasks; stage, commit, push...
 helix-toolbox reliability --critical     # how far the boot, login and driver entries are tested
 helix-toolbox trust sddm                 # where an entry comes from and what checks it
 helix-toolbox doctor                     # health checks, read-only

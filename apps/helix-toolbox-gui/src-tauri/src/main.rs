@@ -20,9 +20,9 @@ use helix_toolbox_engine::{
     overview::Overview,
     performance, plan, plan_removal, preflight, preview, profiles, recovery,
     reliability::{self, Evidence},
-    restic, services,
+    repositories, restic, services,
     settings::{self, RunChoices, WindowTheme},
-    setup, storage, trust, updates, verification, watch,
+    setup, storage, trust, updates, verification, watch, workspaces,
 };
 use helix_toolbox_platform::LinuxInfo;
 use serde::Serialize;
@@ -1799,6 +1799,266 @@ async fn set_restic_timer(app: AppHandle, on: bool, weekly: bool) -> Result<Stri
     .await?
 }
 
+// Repositories
+
+/// The repositories found, as `helix-toolbox repos --json` lists them.
+#[derive(Serialize)]
+struct ReposView {
+    roots: Vec<PathBuf>,
+    depth: usize,
+    origin: String,
+    repositories: Vec<RepoView>,
+}
+
+#[derive(Serialize)]
+struct RepoView {
+    #[serde(flatten)]
+    summary: repositories::Summary,
+    favorite: bool,
+    group: String,
+}
+
+/// A changed file, with its state in words.
+#[derive(Serialize)]
+struct FileView {
+    path: String,
+    original: Option<String>,
+    state: &'static str,
+    staged: bool,
+    unstaged: bool,
+    conflict: bool,
+}
+
+/// One repository, as `helix-toolbox repos show --json`, with its tasks.
+#[derive(Serialize)]
+struct RepositoryView {
+    #[serde(flatten)]
+    details: repositories::Details,
+    changes: Vec<FileView>,
+    favorite: bool,
+    tasks: Vec<workspaces::Task>,
+}
+
+/// The places repositories are looked for, and those found there.
+fn repositories_here(gui: &Gui) -> (repositories::Places, Vec<PathBuf>) {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    let places = repositories::places(gui.settings.as_deref().unwrap_or(Path::new("")), &home);
+    let found = repositories::discover(&places);
+    (places, found)
+}
+
+/// A repository the window was given, only when it is among those found.
+fn repository(gui: &Gui, path: &str) -> Result<PathBuf, String> {
+    let (_, found) = repositories_here(gui);
+    let wanted = std::fs::canonicalize(path).map_err(|_| format!("no folder {path}"))?;
+    found
+        .into_iter()
+        .find(|repo| *repo == wanted)
+        .ok_or_else(|| format!("{path} is not among the repositories found"))
+}
+
+fn workspaces_file(gui: &Gui) -> Result<PathBuf, String> {
+    gui.settings
+        .as_ref()
+        .map(|settings| settings.with_file_name("workspaces.toml"))
+        .ok_or_else(|| "there is no configuration folder".to_string())
+}
+
+fn kept_workspaces(gui: &Gui) -> workspaces::Workspaces {
+    workspaces_file(gui)
+        .ok()
+        .and_then(|file| workspaces::load(&file).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+async fn read_repositories(app: AppHandle) -> Result<ReposView, String> {
+    blocking(app, |gui| {
+        let (places, found) = repositories_here(gui);
+        let kept = kept_workspaces(gui);
+        let mut summaries = repositories::summaries(&repositories::Here, &found);
+        summaries.sort_by_key(|summary| !kept.favorite(&summary.path));
+        ReposView {
+            roots: places.roots,
+            depth: places.depth,
+            origin: places.origin,
+            repositories: summaries
+                .into_iter()
+                .map(|summary| {
+                    let project = kept.project(&summary.path);
+                    RepoView {
+                        favorite: project.is_some_and(|project| project.favorite),
+                        group: project
+                            .map(|project| project.group.clone())
+                            .unwrap_or_default(),
+                        summary,
+                    }
+                })
+                .collect(),
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+async fn read_repository(app: AppHandle, path: String) -> Result<RepositoryView, String> {
+    blocking(app, move |gui| {
+        let repo = repository(gui, &path)?;
+        let details = repositories::details(&repositories::Here, &repo)?;
+        let kept = kept_workspaces(gui);
+        Ok(RepositoryView {
+            changes: details
+                .files
+                .iter()
+                .map(|file| FileView {
+                    path: file.path.clone(),
+                    original: file.original.clone(),
+                    state: file.state(),
+                    staged: file.is_staged(),
+                    unstaged: file.has_unstaged(),
+                    conflict: file.conflict,
+                })
+                .collect(),
+            favorite: kept.favorite(&repo),
+            tasks: workspaces::tasks(&repo, &kept),
+            details,
+        })
+    })
+    .await?
+}
+
+/// The diff of the repository or of one file, staged or not.
+#[tauri::command]
+async fn repository_diff(
+    app: AppHandle,
+    path: String,
+    file: Option<String>,
+    staged: bool,
+) -> Result<repositories::Diff, String> {
+    blocking(app, move |gui| {
+        let repo = repository(gui, &path)?;
+        let details = repositories::details(&repositories::Here, &repo)?;
+        repositories::diff(
+            &repositories::Here,
+            &repo,
+            &details,
+            file.as_deref(),
+            staged,
+        )
+    })
+    .await?
+}
+
+/// A change the window asks for, as `helix-toolbox repos` takes it.
+#[derive(serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum ChangeRequest {
+    Stage { files: Vec<String> },
+    StageAll,
+    Unstage { files: Vec<String> },
+    Commit { message: String },
+    CreateBranch { name: String },
+    SwitchBranch { name: String },
+    Stash { message: String, untracked: bool },
+    ApplyStash { id: String },
+    Fetch,
+    Pull,
+    Push,
+    Publish { remote: String },
+}
+
+impl From<ChangeRequest> for repositories::Change {
+    fn from(request: ChangeRequest) -> Self {
+        use repositories::Change;
+        match request {
+            ChangeRequest::Stage { files } => Change::Stage(files),
+            ChangeRequest::StageAll => Change::StageAll,
+            ChangeRequest::Unstage { files } => Change::Unstage(files),
+            ChangeRequest::Commit { message } => Change::Commit(message),
+            ChangeRequest::CreateBranch { name } => Change::CreateBranch(name),
+            ChangeRequest::SwitchBranch { name } => Change::SwitchBranch(name),
+            ChangeRequest::Stash { message, untracked } => Change::Stash { message, untracked },
+            ChangeRequest::ApplyStash { id } => Change::ApplyStash(id),
+            ChangeRequest::Fetch => Change::Fetch,
+            ChangeRequest::Pull => Change::Pull,
+            ChangeRequest::Push => Change::Push,
+            ChangeRequest::Publish { remote } => Change::Publish(remote),
+        }
+    }
+}
+
+/// A change to a repository, planned from how it is now, to confirm.
+#[tauri::command]
+async fn prepare_repository_change(
+    app: AppHandle,
+    path: String,
+    change: ChangeRequest,
+) -> Result<PreparedView, String> {
+    blocking(app, move |gui| {
+        let planned = repository(gui, &path).and_then(|repo| {
+            let details = repositories::details(&repositories::Here, &repo)?;
+            repositories::plan(&repositories::Here, &details, &change.into())
+        });
+        let catalog = gui.catalog.read().unwrap();
+        match planned {
+            Ok(planned) => prepare_plan(gui, &catalog, planned),
+            Err(why) => cannot(gui, why),
+        }
+    })
+    .await
+}
+
+/// One of a repository's tasks, to confirm before it runs in its folder.
+#[tauri::command]
+async fn prepare_task(app: AppHandle, path: String, id: String) -> Result<PreparedView, String> {
+    blocking(app, move |gui| {
+        let planned = repository(gui, &path).and_then(|repo| {
+            let tasks = workspaces::tasks(&repo, &kept_workspaces(gui));
+            let task = tasks
+                .iter()
+                .find(|task| task.id == id)
+                .ok_or_else(|| format!("it has no task {id}"))?;
+            workspaces::plan_task(&repo, task)
+        });
+        let catalog = gui.catalog.read().unwrap();
+        match planned {
+            Ok(planned) => prepare_plan(gui, &catalog, planned),
+            Err(why) => cannot(gui, why),
+        }
+    })
+    .await
+}
+
+/// Keep a task of the user's, remove one, or mark a favorite, in
+/// `workspaces.toml`.
+#[tauri::command]
+async fn save_workspace(
+    app: AppHandle,
+    path: String,
+    favorite: Option<bool>,
+    task: Option<workspaces::Task>,
+    remove: Option<String>,
+) -> Result<(), String> {
+    blocking(app, move |gui| {
+        let repo = repository(gui, &path)?;
+        let file = workspaces_file(gui)?;
+        let mut kept = workspaces::load(&file)?;
+        if let Some(favorite) = favorite {
+            kept.set_favorite(&repo, favorite);
+        }
+        if let Some(task) = task {
+            kept.add_task(&repo, task)?;
+        }
+        if let Some(id) = remove {
+            kept.remove_task(&repo, &id)?;
+        }
+        workspaces::save(&file, &kept)
+    })
+    .await?
+}
+
 // Hardware
 
 /// Firmware, disks, sensors, batteries and devices, read from this machine.
@@ -2443,6 +2703,8 @@ fn main() {
                 read_migration_export, export_migration, open_migration, prepare_migration,
                 read_restic, restic_files, restic_history, prepare_restic, record_baseline,
                 set_restic_timer,
+                read_repositories, read_repository, repository_diff, prepare_repository_change,
+                prepare_task, save_workspace,
                 drift_check, save_baseline, reliability, trust, read_hardware, prepare_firmware,
                 prepare_smart, read_desktop, save_look, prepare_look, read_settings,
                 save_settings, save_watch, save_theme, bundle_contents, prepare_bundle_create,

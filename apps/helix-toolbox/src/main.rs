@@ -12,6 +12,7 @@ mod manage;
 mod migrate;
 mod notify;
 mod report;
+mod repos;
 mod restic;
 mod selfupdate;
 mod setup;
@@ -285,6 +286,14 @@ enum Command {
     Restic {
         #[command(subcommand)]
         action: Option<restic::ResticCommand>,
+    },
+    /// The Git repositories under your project folders: their branch,
+    /// changes and upstream, one repository's files, diffs, branches and
+    /// stashes, and its tasks. Reading changes nothing; staging, commits,
+    /// branches, stashes, syncing and tasks are plans, confirmed first.
+    Repos {
+        #[command(subcommand)]
+        action: Option<repos::ReposCommand>,
     },
     /// The hardware and firmware: fwupd's devices and the firmware updates it
     /// knows of, disks, temperatures, batteries, PCI and USB devices. It only
@@ -991,6 +1000,7 @@ fn main() -> Result<()> {
         ),
         Command::Migrate { action } => migrate::migrate(action, &load(false)?, &platform, as_json),
         Command::Restic { action } => restic::restic(action, &load(false)?, &platform, as_json),
+        Command::Repos { action } => repos::repos(action, &load(false)?, &platform, as_json),
         Command::Hardware {
             smart,
             firmware,

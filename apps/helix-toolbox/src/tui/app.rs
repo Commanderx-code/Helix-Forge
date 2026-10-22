@@ -26,10 +26,12 @@ use helix_toolbox_engine::{
     notifications,
     overview::Overview,
     performance, plan, plan_removal, preflight, profiles, recovery, reliability,
+    repositories::{self as repos, Change, Details, Summary},
     restic::{self, Restic},
     services::{self, Verb},
     storage, updates,
     watch::{self, Watch},
+    workspaces::{self, Task, Workspaces},
 };
 use helix_toolbox_platform::LinuxInfo;
 use ratatui::{
@@ -91,8 +93,7 @@ Areas (Applications and the other catalog screens)
   g                 flags guide     *   pin a favorite     i   show all, installed or updates
 
 Install Plan
-  Enter             run the plan                 x / Delete  remove the selected entry
-  c                 clear the plan               s           save it as a profile;  e  what it changes
+  Enter run it   x / Delete remove an entry   c clear it   s save as a profile   e what it changes
 
 History, Backups, Doctor, Hardware, Desktop, Updates, Drift, Reliability, Settings
   Enter             log / restore / details / change   r   reload or check again; f repair; u / U update
@@ -104,6 +105,7 @@ History, Backups, Doctor, Hardware, Desktop, Updates, Drift, Reliability, Settin
   Performance: b an earlier boot  Enter acts on a hint   Recovery: c check snapshots  f set up
   Migration: e export  o open a file  a install    Restic: b back up  c check  s a file's history
   Restic: Enter browse  R restore into a new folder  n record a baseline  v test it  w timer
+  Repositories: Enter open/diff/run  Space stage  c commit  b branch  s stash  F p P sync
 
 Running window
   Ctrl-C            stop; again, kill what is left  Enter / q   close when finished
@@ -145,6 +147,8 @@ enum Screen {
     Migration,
     /// Restic backups of your own files, and recovery tests.
     Restic,
+    /// The repositories under the project folders, and one of them.
+    Repositories,
     Settings,
 }
 
@@ -259,6 +263,22 @@ struct ResticBrowse {
 
 /// A search for a file's history, and what it found.
 type ResticSearch = (String, Result<Vec<restic::History>, String>);
+/// A line of the Repositories screen: in the list, a repository; in one
+/// repository, a file, branch, stash, commit or task, by its place.
+#[derive(Clone, Debug)]
+enum RepoRow {
+    Heading(String),
+    Text(String),
+    Repository(usize),
+    File(usize),
+    Branch(usize),
+    Stash(usize),
+    Commit(usize),
+    Task(usize),
+}
+
+/// One repository read, with its tasks, or why it could not be.
+type RepoOpened = Result<(Details, Vec<Task>), String>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Focus {
@@ -318,6 +338,14 @@ enum Asked {
     ResticBaseline,
     /// The snapshot to test the baseline with this id against.
     ResticTest(String),
+    /// The open repository's commit message.
+    CommitMessage,
+    /// A branch to create in the open repository.
+    NewBranch,
+    /// The stash's message.
+    StashMessage,
+    /// A command of the user's to keep as a task of the open repository.
+    AddTask,
 }
 
 /// A line of the Offline bundles screen.
@@ -724,6 +752,17 @@ pub struct App {
     restic_rows: Vec<ResticRow>,
     /// What runs restic: restic itself, or a test's stand-in.
     restic: std::sync::Arc<dyn Restic + Send + Sync>,
+    /// Where repositories are looked for; set by tests, else from the
+    /// settings.
+    repo_places: Option<repos::Places>,
+    /// The user's workspaces file: beside the settings, or set by tests.
+    workspaces_file: Option<PathBuf>,
+    repos_found: Option<(repos::Places, Vec<Summary>)>,
+    reading_repos: Option<mpsc::Receiver<(repos::Places, Vec<Summary>)>>,
+    /// The repository open, with its tasks.
+    repo_open: Option<(Details, Vec<Task>)>,
+    opening_repo: Option<mpsc::Receiver<RepoOpened>>,
+    repo_rows: Vec<RepoRow>,
 }
 
 /// A plan of the queue as it was, from when it was made, with what the
@@ -846,6 +885,13 @@ impl App {
             searching_restic: None,
             restic_rows: Vec::new(),
             restic: std::sync::Arc::new(restic::Here),
+            repo_places: None,
+            workspaces_file: None,
+            repos_found: None,
+            reading_repos: None,
+            repo_open: None,
+            opening_repo: None,
+            repo_rows: Vec::new(),
         };
         app.update_rows();
         if !args.bypass_root && nix::unistd::Uid::effective().is_root() {
@@ -1099,6 +1145,7 @@ impl App {
             Screen::Recovery => self.recovery_found.len(),
             Screen::Migration => self.migration_rows.len(),
             Screen::Restic => self.restic_rows.len(),
+            Screen::Repositories => self.repo_rows.len(),
             Screen::Doctor => self.diagnoses.len() + self.doctor_entries().len(),
             Screen::Settings => self.settings().len(),
         }
@@ -1200,6 +1247,13 @@ impl App {
                 self.read_restic();
             } else {
                 self.build_restic_rows();
+            }
+        }
+        if screen == Screen::Repositories {
+            if self.repos_found.is_none() {
+                self.read_repos();
+            } else {
+                self.build_repo_rows();
             }
         }
         self.update_rows();
@@ -1314,6 +1368,29 @@ impl App {
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
+        if let Some(receiver) = &self.reading_repos {
+            match receiver.try_recv() {
+                Ok(found) => {
+                    self.reading_repos = None;
+                    self.repos_found = Some(found);
+                    self.build_repo_rows();
+                    return true;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => self.reading_repos = None,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if let Some(receiver) = &self.opening_repo {
+            match receiver.try_recv() {
+                Ok(read) => {
+                    self.opening_repo = None;
+                    self.opened_repo(read);
+                    return true;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => self.opening_repo = None,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
         if let Some(receiver) = &self.reading_storage {
             match receiver.try_recv() {
                 Ok(found) => {
@@ -1409,6 +1486,7 @@ impl App {
             Screen::Recovery => Icon::Recovery,
             Screen::Migration => Icon::Migration,
             Screen::Restic => Icon::Restic,
+            Screen::Repositories => Icon::Repositories,
             Screen::Favorites => Icon::Favorites,
             Screen::Doctor => Icon::Doctor,
             Screen::Settings => Icon::Settings,
@@ -1492,6 +1570,7 @@ impl App {
             Screen::Recovery => self.draw_recovery(frame, main),
             Screen::Migration => self.draw_migration(frame, main),
             Screen::Restic => self.draw_restic(frame, main),
+            Screen::Repositories => self.draw_repos(frame, main),
             Screen::Doctor => self.draw_doctor(frame, main),
             Screen::Settings => self.draw_settings(frame, main),
         }
@@ -2999,6 +3078,7 @@ impl App {
                     }
                     list.push(Hint::new(&["r"], "Read again"));
                 }
+                Screen::Repositories => self.repo_hints(&mut list),
                 Screen::Settings => list.push(Hint::new(&["Enter"], "Change")),
             },
         }
@@ -3240,6 +3320,9 @@ impl App {
                     }
                     if self.screen == Screen::Restic {
                         self.read_restic();
+                    }
+                    if self.screen == Screen::Repositories {
+                        self.reload_repos();
                     }
                 }
                 return true;
@@ -3875,6 +3958,7 @@ impl App {
                 KeyCode::Char('h') | KeyCode::Left => self.focus = Focus::Sidebar,
                 _ => {}
             },
+            Screen::Repositories => self.repo_key(key.code),
             Screen::Bundles => match key.code {
                 KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Char('l') | KeyCode::Right => {
                     self.bundle_enter()
@@ -6218,6 +6302,22 @@ impl App {
                 self.build_service_rows();
                 return;
             }
+            Asked::CommitMessage => {
+                self.plan_repo_change(Change::Commit(text.to_string()));
+                return;
+            }
+            Asked::NewBranch => {
+                self.plan_repo_change(Change::CreateBranch(text.trim().to_string()));
+                return;
+            }
+            Asked::StashMessage => {
+                self.plan_repo_change(Change::Stash {
+                    message: text.to_string(),
+                    untracked: true,
+                });
+                return;
+            }
+            Asked::AddTask => ("Task kept", self.add_repo_task(text)),
             Asked::ExportMigration => ("Migration exported", self.export_migration(text)),
             Asked::ResticHistory => {
                 self.search_restic(text.trim().to_string());
@@ -8327,6 +8427,728 @@ impl App {
         frame.render_stateful_widget(list, inner, &mut self.main_state);
     }
 
+    // ----- Repositories -----
+
+    /// Where repositories are looked for: the tests' places, else those the
+    /// settings name; none in a test that sets none.
+    fn places_here(&self) -> Option<repos::Places> {
+        if let Some(places) = &self.repo_places {
+            return Some(places.clone());
+        }
+        let settings = self.settings_path.as_ref()?;
+        let home = std::env::var_os("HOME").map(PathBuf::from)?;
+        Some(repos::places(settings, &home))
+    }
+
+    fn workspaces_path(&self) -> Option<PathBuf> {
+        self.workspaces_file.clone().or_else(|| {
+            self.settings_path
+                .as_ref()
+                .map(|settings| settings.with_file_name("workspaces.toml"))
+        })
+    }
+
+    fn kept_workspaces(&self) -> Workspaces {
+        self.workspaces_path()
+            .and_then(|path| workspaces::load(&path).ok())
+            .unwrap_or_default()
+    }
+
+    /// Find the repositories and read each, in the background on this
+    /// machine; favorites first.
+    fn read_repos(&mut self) {
+        let Some(places) = self.places_here() else {
+            self.repos_found = Some((
+                repos::Places {
+                    roots: Vec::new(),
+                    depth: repos::DEFAULT_DEPTH,
+                    origin: "default".to_string(),
+                },
+                Vec::new(),
+            ));
+            self.build_repo_rows();
+            return;
+        };
+        let kept = self.kept_workspaces();
+        let read = move || {
+            let found = repos::discover(&places);
+            let mut summaries = repos::summaries(&repos::Here, &found);
+            summaries.sort_by_key(|summary| !kept.favorite(&summary.path));
+            (places, summaries)
+        };
+        if self.examine_here {
+            let (sender, receiver) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = sender.send(read());
+            });
+            self.reading_repos = Some(receiver);
+        } else {
+            self.repos_found = Some(read());
+        }
+        self.build_repo_rows();
+    }
+
+    /// Read the list again, and the open repository with it.
+    fn reload_repos(&mut self) {
+        self.read_repos();
+        if let Some((found, _)) = &self.repo_open {
+            let path = found.summary.path.clone();
+            self.open_repo(path);
+        }
+    }
+
+    /// Read one repository and its tasks, in the background on this machine.
+    fn open_repo(&mut self, path: PathBuf) {
+        let kept = self.kept_workspaces();
+        let read = move || -> RepoOpened {
+            let found = repos::details(&repos::Here, &path)?;
+            let tasks = workspaces::tasks(&path, &kept);
+            Ok((found, tasks))
+        };
+        if self.examine_here {
+            let (sender, receiver) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = sender.send(read());
+            });
+            self.opening_repo = Some(receiver);
+            self.build_repo_rows();
+        } else {
+            self.opened_repo(read());
+        }
+    }
+
+    fn opened_repo(&mut self, read: RepoOpened) {
+        match read {
+            Ok(open) => {
+                let same = self
+                    .repo_open
+                    .as_ref()
+                    .map(|(found, _)| &found.summary.path)
+                    == Some(&open.0.summary.path);
+                self.repo_open = Some(open);
+                if !same {
+                    self.main_state.select(Some(0));
+                }
+                self.build_repo_rows();
+            }
+            Err(why) => {
+                self.popup = Some(Popup::Text(TextPopup::new(
+                    "Cannot read the repository",
+                    why,
+                    true,
+                )));
+            }
+        }
+    }
+
+    /// Back from a repository to the list; false when the list is shown.
+    fn close_repo(&mut self) -> bool {
+        if self.repo_open.take().is_none() {
+            return false;
+        }
+        self.main_state.select(Some(0));
+        self.build_repo_rows();
+        true
+    }
+
+    fn selected_repo_row(&self) -> Option<RepoRow> {
+        self.repo_rows.get(self.main_state.selected()?).cloned()
+    }
+
+    fn repo_key(&mut self, code: KeyCode) {
+        let open = self.repo_open.is_some();
+        match code {
+            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => self.repo_enter(),
+            KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
+                if !self.close_repo() {
+                    self.focus = Focus::Sidebar;
+                }
+            }
+            KeyCode::Char('r') => self.reload_repos(),
+            KeyCode::Char('f') => self.toggle_repo_favorite(),
+            _ if !open => {}
+            KeyCode::Char(' ') => self.stage_selected(),
+            KeyCode::Char('A') => self.plan_repo_change(Change::StageAll),
+            KeyCode::Char('c') => {
+                self.popup = Some(Popup::Ask(
+                    InputPopup::new("Commit", "The commit message:").answering("Review"),
+                    Asked::CommitMessage,
+                ))
+            }
+            KeyCode::Char('b') => {
+                self.popup = Some(Popup::Ask(
+                    InputPopup::new("New branch", "The branch to create and switch to:")
+                        .answering("Review"),
+                    Asked::NewBranch,
+                ))
+            }
+            KeyCode::Char('s') => {
+                self.popup = Some(Popup::Ask(
+                    InputPopup::new("Stash", "A message for the stash (new files go in it too):")
+                        .answering("Review"),
+                    Asked::StashMessage,
+                ))
+            }
+            KeyCode::Char('F') => self.plan_repo_change(Change::Fetch),
+            KeyCode::Char('p') => self.plan_repo_change(Change::Pull),
+            KeyCode::Char('P') => self.push_repo(),
+            KeyCode::Char('n') => {
+                self.popup = Some(Popup::Ask(
+                    InputPopup::new(
+                        "A task of yours",
+                        "The command, run in the repository's folder, such as npm run serve:",
+                    )
+                    .answering("Keep"),
+                    Asked::AddTask,
+                ))
+            }
+            KeyCode::Char('x') => self.remove_repo_task(),
+            _ => {}
+        }
+    }
+
+    /// Enter: open a repository; in one, a file's diff, a branch to switch
+    /// to, a stash to apply or a task to run.
+    fn repo_enter(&mut self) {
+        let Some(row) = self.selected_repo_row() else {
+            return;
+        };
+        let Some((found, tasks)) = &self.repo_open else {
+            if let (RepoRow::Repository(index), Some((_, summaries))) = (row, &self.repos_found)
+                && let Some(summary) = summaries.get(index)
+            {
+                let path = summary.path.clone();
+                self.open_repo(path);
+            }
+            return;
+        };
+        match row {
+            RepoRow::File(index) => {
+                let Some(file) = found.files.get(index) else {
+                    return;
+                };
+                let path = found.summary.path.clone();
+                let mut text = String::new();
+                for (staged, heading) in [(true, "Staged"), (false, "Not staged")] {
+                    if (staged && !file.is_staged()) || (!staged && !file.has_unstaged()) {
+                        continue;
+                    }
+                    match repos::diff(&repos::Here, &path, found, Some(&file.path), staged) {
+                        Ok(shown) => {
+                            text.push_str(&format!("{heading}:\n{}", shown.text));
+                            if shown.truncated {
+                                text.push_str("(cut short)\n");
+                            }
+                        }
+                        Err(why) => text.push_str(&format!("{heading}: {why}\n")),
+                    }
+                }
+                let text: String = text
+                    .lines()
+                    .map(|line| format!("{}\n", helix_toolbox_core::printable(line)))
+                    .collect();
+                self.popup = Some(Popup::Text(TextPopup::new(
+                    helix_toolbox_core::printable(&file.path),
+                    text,
+                    false,
+                )));
+            }
+            RepoRow::Branch(index) => {
+                if let Some(branch) = found.branches.get(index).cloned()
+                    && Some(&branch) != found.summary.branch.as_ref()
+                {
+                    self.plan_repo_change(Change::SwitchBranch(branch));
+                }
+            }
+            RepoRow::Stash(index) => {
+                if let Some(stash) = found.stashes.get(index) {
+                    let id = stash.id.clone();
+                    self.plan_repo_change(Change::ApplyStash(id));
+                }
+            }
+            RepoRow::Task(index) => {
+                if let Some(task) = tasks.get(index) {
+                    match workspaces::plan_task(&found.summary.path, task) {
+                        Ok(planned) => self.confirm_plan(Ok(planned)),
+                        Err(why) => {
+                            self.popup = Some(Popup::Text(TextPopup::new("Cannot plan", why, true)))
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Review a change to the open repository.
+    fn plan_repo_change(&mut self, change: Change) {
+        let Some((found, _)) = &self.repo_open else {
+            return;
+        };
+        match repos::plan(&repos::Here, found, &change) {
+            Ok(planned) => self.confirm_plan(Ok(planned)),
+            Err(why) => self.popup = Some(Popup::Text(TextPopup::new("Cannot plan", why, true))),
+        }
+    }
+
+    /// Space: stage the file's changes, or unstage it when all are staged.
+    fn stage_selected(&mut self) {
+        let (Some(RepoRow::File(index)), Some((found, _))) =
+            (self.selected_repo_row(), &self.repo_open)
+        else {
+            return;
+        };
+        let Some(file) = found.files.get(index) else {
+            return;
+        };
+        let paths = vec![file.path.clone()];
+        let change = if file.has_unstaged() || file.conflict {
+            Change::Stage(paths)
+        } else {
+            Change::Unstage(paths)
+        };
+        self.plan_repo_change(change);
+    }
+
+    /// P: push to the upstream, or publish the branch to origin (or the
+    /// only remote) when it has none.
+    fn push_repo(&mut self) {
+        let Some((found, _)) = &self.repo_open else {
+            return;
+        };
+        let change = if found.push_to.is_some() {
+            Change::Push
+        } else {
+            match found
+                .remotes
+                .iter()
+                .find(|remote| *remote == "origin")
+                .or(found.remotes.first())
+            {
+                Some(remote) => Change::Publish(remote.clone()),
+                None => Change::Push,
+            }
+        };
+        self.plan_repo_change(change);
+    }
+
+    fn toggle_repo_favorite(&mut self) {
+        let path = match (&self.repo_open, self.selected_repo_row(), &self.repos_found) {
+            (Some((found, _)), ..) => found.summary.path.clone(),
+            (None, Some(RepoRow::Repository(index)), Some((_, summaries))) => {
+                match summaries.get(index) {
+                    Some(summary) => summary.path.clone(),
+                    None => return,
+                }
+            }
+            _ => return,
+        };
+        let Some(file) = self.workspaces_path() else {
+            return;
+        };
+        let mut kept = self.kept_workspaces();
+        let favorite = !kept.favorite(&path);
+        kept.set_favorite(&path, favorite);
+        if let Err(why) = workspaces::save(&file, &kept) {
+            self.popup = Some(Popup::Text(TextPopup::new("It did not work", why, true)));
+            return;
+        }
+        self.reload_repos();
+    }
+
+    /// Keep a command as a task of the open repository.
+    fn add_repo_task(&mut self, text: &str) -> Result<String, String> {
+        let Some((found, _)) = &self.repo_open else {
+            return Err("No repository is open.".to_string());
+        };
+        let command = text.trim().to_string();
+        let mut id: String = command
+            .to_lowercase()
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+        while id.contains("--") {
+            id = id.replace("--", "-");
+        }
+        let id: String = id.trim_matches('-').chars().take(40).collect();
+        let path = found.summary.path.clone();
+        let file = self
+            .workspaces_path()
+            .ok_or("There is no configuration folder to keep it in.")?;
+        let mut kept = self.kept_workspaces();
+        kept.add_task(
+            &path,
+            Task {
+                id: if id.is_empty() {
+                    "task".to_string()
+                } else {
+                    id
+                },
+                name: command.chars().take(80).collect(),
+                command: command.clone(),
+                shell: workspaces::Shell::Direct,
+                detected: false,
+            },
+        )?;
+        workspaces::save(&file, &kept)?;
+        self.open_repo(path);
+        Ok(format!(
+            "{command} is kept as a task in {}. Enter on it runs it, after you review it.",
+            file.display()
+        ))
+    }
+
+    /// x: remove the selected task, when it is one of the user's.
+    fn remove_repo_task(&mut self) {
+        let (Some(RepoRow::Task(index)), Some((found, tasks))) =
+            (self.selected_repo_row(), &self.repo_open)
+        else {
+            return;
+        };
+        let Some(task) = tasks.get(index) else {
+            return;
+        };
+        if task.detected {
+            self.popup = Some(Popup::Text(TextPopup::new(
+                "Not yours to remove",
+                "The repository's manifest names this task; only tasks you added are removed.",
+                true,
+            )));
+            return;
+        }
+        let (path, id) = (found.summary.path.clone(), task.id.clone());
+        let Some(file) = self.workspaces_path() else {
+            return;
+        };
+        let mut kept = self.kept_workspaces();
+        let removed = kept
+            .remove_task(&path, &id)
+            .and_then(|_| workspaces::save(&file, &kept));
+        if let Err(why) = removed {
+            self.popup = Some(Popup::Text(TextPopup::new("It did not work", why, true)));
+            return;
+        }
+        self.open_repo(path);
+    }
+
+    fn repo_hints(&self, list: &mut Vec<Hint>) {
+        list.push(Hint::new(&["↑↓"], "Navigate"));
+        let Some((found, _)) = &self.repo_open else {
+            list.push(Hint::new(&["Enter"], "Open"));
+            list.push(Hint::new(&["f"], "Favorite"));
+            list.push(Hint::new(&["r"], "Read again"));
+            return;
+        };
+        match self.selected_repo_row() {
+            Some(RepoRow::File(_)) => {
+                list.push(Hint::new(&["Enter"], "Diff"));
+                list.push(Hint::new(&["Space"], "Stage"));
+            }
+            Some(RepoRow::Branch(_)) => list.push(Hint::new(&["Enter"], "Switch")),
+            Some(RepoRow::Stash(_)) => list.push(Hint::new(&["Enter"], "Apply")),
+            Some(RepoRow::Task(_)) => {
+                list.push(Hint::new(&["Enter"], "Run"));
+                list.push(Hint::new(&["x"], "Remove"));
+            }
+            _ => {}
+        }
+        if found.staged() > 0 {
+            list.push(Hint::new(&["c"], "Commit"));
+        }
+        list.push(Hint::new(&["b"], "Branch"));
+        if !found.clean() {
+            list.push(Hint::new(&["s"], "Stash"));
+        }
+        if !found.remotes.is_empty() {
+            list.push(Hint::new(&["F", "p", "P"], "Fetch, pull, push"));
+        }
+        list.push(Hint::new(&["n"], "Task"));
+        list.push(Hint::new(&["h"], "Back"));
+    }
+
+    fn build_repo_rows(&mut self) {
+        let mut rows: Vec<RepoRow> = Vec::new();
+        if let Some((found, tasks)) = &self.repo_open {
+            let summary = &found.summary;
+            rows.push(RepoRow::Heading(format!(
+                "{} on {}: {}",
+                summary.name,
+                summary.branch.as_deref().unwrap_or("a detached HEAD"),
+                crate::repos::sync_words(summary)
+            )));
+            rows.push(RepoRow::Text(summary.path.display().to_string()));
+            if let Some(origin) = &summary.origin {
+                rows.push(RepoRow::Text(format!("origin {origin}")));
+            }
+            if let Some(busy) = &found.busy {
+                rows.push(RepoRow::Text(format!(
+                    "In the middle of {busy}: finish it with git."
+                )));
+            }
+            if found.files.is_empty() {
+                rows.push(RepoRow::Heading("No changes".into()));
+            } else {
+                rows.push(RepoRow::Heading(format!(
+                    "Changes ({}, {} staged)",
+                    found.files.len(),
+                    found.staged()
+                )));
+                rows.extend((0..found.files.len()).map(RepoRow::File));
+            }
+            if !found.branches.is_empty() {
+                rows.push(RepoRow::Heading("Branches".into()));
+                rows.extend((0..found.branches.len()).map(RepoRow::Branch));
+            }
+            if !found.stashes.is_empty() {
+                rows.push(RepoRow::Heading("Stashes".into()));
+                rows.extend((0..found.stashes.len()).map(RepoRow::Stash));
+            }
+            rows.push(RepoRow::Heading("Tasks".into()));
+            if tasks.is_empty() {
+                rows.push(RepoRow::Text(
+                    "None found in its manifests; n keeps a command of yours.".into(),
+                ));
+            }
+            rows.extend((0..tasks.len()).map(RepoRow::Task));
+            if !found.log.is_empty() {
+                rows.push(RepoRow::Heading("Recent commits".into()));
+                rows.extend((0..found.log.len()).map(RepoRow::Commit));
+            }
+        } else if self.opening_repo.is_some() {
+            rows.push(RepoRow::Heading("Reading the repository…".into()));
+        } else {
+            match &self.repos_found {
+                None => rows.push(RepoRow::Heading("Looking for repositories…".into())),
+                Some((places, summaries)) => {
+                    let roots = if places.roots.is_empty() {
+                        "no folders".to_string()
+                    } else {
+                        places
+                            .roots
+                            .iter()
+                            .map(|root| root.display().to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    };
+                    if summaries.is_empty() {
+                        rows.push(RepoRow::Heading("No repositories found".into()));
+                    } else {
+                        rows.push(RepoRow::Heading(format!(
+                            "{} repositories",
+                            summaries.len()
+                        )));
+                        rows.extend((0..summaries.len()).map(RepoRow::Repository));
+                    }
+                    rows.push(RepoRow::Text(format!(
+                        "Under {roots}, {} folders deep (from the {}); [repositories] roots in settings.toml changes it.",
+                        places.depth, places.origin
+                    )));
+                }
+            }
+            if self.reading_repos.is_some() && self.repos_found.is_some() {
+                rows.push(RepoRow::Text("Reading them again…".into()));
+            }
+        }
+        self.repo_rows = rows;
+        self.clamp_main();
+    }
+
+    fn draw_repos(&mut self, frame: &mut Frame, area: Rect) {
+        let inner = self.page(
+            frame,
+            area,
+            "Repositories",
+            "The Git repositories under your project folders. Reading changes nothing; every change is reviewed first.",
+        );
+        self.fill(frame, inner);
+        let focused = self.focus == Focus::Main;
+        let printable = helix_toolbox_core::printable;
+        let muted = Style::default().fg(self.theme.muted());
+        let kept = self.kept_workspaces();
+        let mut items: Vec<Line> = Vec::new();
+        for row in &self.repo_rows {
+            items.push(match row {
+                RepoRow::Heading(text) => Line::styled(
+                    printable(text),
+                    Style::default().fg(self.theme.group()).bold(),
+                ),
+                RepoRow::Text(text) => Line::styled(format!("  {}", printable(text)), muted),
+                RepoRow::Repository(index) => {
+                    let Some(summary) = self
+                        .repos_found
+                        .as_ref()
+                        .and_then(|(_, summaries)| summaries.get(*index))
+                    else {
+                        continue;
+                    };
+                    let changes = match (&summary.problem, summary.changed) {
+                        (Some(problem), _) => problem.clone(),
+                        (None, 0) => "clean".to_string(),
+                        (None, count) => format!("{count} changed"),
+                    };
+                    let color = if summary.problem.is_some() {
+                        self.theme.failure()
+                    } else if summary.changed > 0 {
+                        self.theme.warning()
+                    } else {
+                        self.theme.success()
+                    };
+                    Line::from(vec![
+                        Span::styled(
+                            format!(
+                                "{}{:<26}",
+                                if kept.favorite(&summary.path) {
+                                    "★ "
+                                } else {
+                                    "  "
+                                },
+                                printable(&summary.name)
+                            ),
+                            Style::default().fg(self.theme.entry()),
+                        ),
+                        Span::styled(
+                            format!(
+                                "{:<20}",
+                                printable(summary.branch.as_deref().unwrap_or("(detached)"))
+                            ),
+                            muted,
+                        ),
+                        Span::styled(format!("{changes:<14}"), Style::default().fg(color)),
+                        Span::styled(format!("{:<18}", crate::repos::sync_words(summary)), muted),
+                        Span::styled(
+                            printable(summary.last.as_deref().unwrap_or_default()),
+                            muted,
+                        ),
+                    ])
+                }
+                RepoRow::File(index) => {
+                    let Some(file) = self
+                        .repo_open
+                        .as_ref()
+                        .and_then(|(found, _)| found.files.get(*index))
+                    else {
+                        continue;
+                    };
+                    let color = if file.conflict {
+                        self.theme.failure()
+                    } else if file.is_staged() && !file.has_unstaged() {
+                        self.theme.success()
+                    } else {
+                        self.theme.warning()
+                    };
+                    Line::from(vec![
+                        Span::styled(
+                            format!(
+                                "  {} {:<13}",
+                                if file.is_staged() { "●" } else { "○" },
+                                file.state()
+                            ),
+                            Style::default().fg(color),
+                        ),
+                        Span::styled(
+                            format!(
+                                "{}{}",
+                                printable(&file.path),
+                                file.original
+                                    .as_deref()
+                                    .map(|original| format!(" (was {})", printable(original)))
+                                    .unwrap_or_default()
+                            ),
+                            Style::default().fg(self.theme.entry()),
+                        ),
+                    ])
+                }
+                RepoRow::Branch(index) => {
+                    let Some((found, _)) = &self.repo_open else {
+                        continue;
+                    };
+                    let branch = &found.branches[*index];
+                    let current = found.summary.branch.as_ref() == Some(branch);
+                    Line::styled(
+                        format!(
+                            "  {} {}",
+                            if current { "●" } else { " " },
+                            printable(branch)
+                        ),
+                        Style::default().fg(if current {
+                            self.theme.success()
+                        } else {
+                            self.theme.entry()
+                        }),
+                    )
+                }
+                RepoRow::Stash(index) => {
+                    let Some((found, _)) = &self.repo_open else {
+                        continue;
+                    };
+                    let stash = &found.stashes[*index];
+                    Line::from(vec![
+                        Span::styled(
+                            format!("  {:<12}", stash.name),
+                            Style::default().fg(self.theme.entry()),
+                        ),
+                        Span::styled(printable(&stash.subject), muted),
+                    ])
+                }
+                RepoRow::Commit(index) => {
+                    let Some((found, _)) = &self.repo_open else {
+                        continue;
+                    };
+                    let commit = &found.log[*index];
+                    Line::from(vec![
+                        Span::styled(format!("  {:<10}", commit.hash), muted),
+                        Span::styled(
+                            format!(
+                                "{:<12}",
+                                commit
+                                    .at
+                                    .map(helix_toolbox_engine::date)
+                                    .unwrap_or_default()
+                            ),
+                            muted,
+                        ),
+                        Span::styled(
+                            printable(&commit.subject),
+                            Style::default().fg(self.theme.entry()),
+                        ),
+                    ])
+                }
+                RepoRow::Task(index) => {
+                    let Some((_, tasks)) = &self.repo_open else {
+                        continue;
+                    };
+                    let task = &tasks[*index];
+                    Line::from(vec![
+                        Span::styled(
+                            format!("  {:<28}", printable(&task.name)),
+                            Style::default().fg(self.theme.entry()),
+                        ),
+                        Span::styled(
+                            format!(
+                                "{}{}",
+                                if task.detected { "" } else { "yours: " },
+                                printable(&task.command)
+                            ),
+                            muted,
+                        ),
+                    ])
+                }
+            });
+        }
+        let list = List::new(items)
+            .block(self.card("Repositories"))
+            .highlight_style(self.highlight(focused))
+            .highlight_symbol(self.marker(focused))
+            .scroll_padding(1);
+        frame.render_stateful_widget(list, inner, &mut self.main_state);
+    }
+
     // ----- Offline bundles -----
 
     fn selected_bundle_row(&self) -> Option<BundleRow> {
@@ -9129,6 +9951,11 @@ fn build_menu(catalog: &Catalog) -> Vec<MenuItem> {
     menu.push(MenuItem {
         label: "Restic".into(),
         screen: Screen::Restic,
+        section: "MORE TOOLS",
+    });
+    menu.push(MenuItem {
+        label: "Repositories".into(),
+        screen: Screen::Repositories,
         section: "MORE TOOLS",
     });
     menu.push(MenuItem {
@@ -10822,6 +11649,147 @@ mod tests {
         let written = migration::read(&target).unwrap();
         assert_eq!(written.packages, ["htop"]);
         assert!(screen(&mut app, 140, 40).contains("Migration exported"));
+    }
+
+    /// A repository of the test's own under `folder/projects`: one commit
+    /// and a new file.
+    fn sample_repository(folder: &Path) -> PathBuf {
+        let repo = folder.join("projects/sample");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "Test")
+                .env("GIT_AUTHOR_EMAIL", "test@example.com")
+                .env("GIT_COMMITTER_NAME", "Test")
+                .env("GIT_COMMITTER_EMAIL", "test@example.com")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?}");
+        };
+        git(&["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("one.txt"), "one\n").unwrap();
+        git(&["add", "one.txt"]);
+        git(&["commit", "-q", "-m", "First"]);
+        std::fs::write(repo.join("new.txt"), "new\n").unwrap();
+        repo.canonicalize().unwrap()
+    }
+
+    fn repository_app(folder: &Path) -> App {
+        let mut app = app();
+        app.repo_places = Some(repos::Places {
+            roots: vec![folder.join("projects")],
+            depth: 3,
+            origin: "settings".into(),
+        });
+        app.workspaces_file = Some(folder.join("workspaces.toml"));
+        app
+    }
+
+    fn select_repo_row(app: &mut App, wanted: impl Fn(&RepoRow) -> bool) {
+        let index = app.repo_rows.iter().position(wanted).unwrap();
+        app.main_state.select(Some(index));
+    }
+
+    #[test]
+    fn the_repositories_screen_lists_them_and_opens_one() {
+        let folder = tempfile::tempdir().unwrap();
+        sample_repository(folder.path());
+        let mut app = repository_app(folder.path());
+        app.open_screen(Screen::Repositories);
+        app.focus = Focus::Main;
+        let shown = screen(&mut app, 160, 40);
+        for text in [
+            "1 repositories",
+            "sample",
+            "main",
+            "1 changed",
+            "no upstream",
+            "First",
+        ] {
+            assert!(shown.contains(text), "{text}: {shown}");
+        }
+        select_repo_row(&mut app, |row| matches!(row, RepoRow::Repository(0)));
+        press(&mut app, KeyCode::Enter);
+        let shown = screen(&mut app, 160, 40);
+        for text in [
+            "sample on main: no upstream",
+            "Changes (1, 0 staged)",
+            "new.txt",
+            "Branches",
+            "Tasks",
+            "n keeps a command of yours",
+            "Recent commits",
+        ] {
+            assert!(shown.contains(text), "{text}: {shown}");
+        }
+        // Enter on a file shows its diff.
+        select_repo_row(&mut app, |row| matches!(row, RepoRow::File(0)));
+        press(&mut app, KeyCode::Enter);
+        assert!(screen(&mut app, 160, 40).contains("+new"));
+        press(&mut app, KeyCode::Esc);
+        // f keeps it as a favorite, marked in the list.
+        press(&mut app, KeyCode::Char('f'));
+        let kept = std::fs::read_to_string(folder.path().join("workspaces.toml")).unwrap();
+        assert!(kept.contains("favorite = true"), "{kept}");
+        press(&mut app, KeyCode::Char('h'));
+        assert!(app.repo_open.is_none());
+        assert!(screen(&mut app, 160, 40).contains("★ sample"));
+    }
+
+    #[test]
+    fn changes_to_a_repository_are_reviewed_before_anything_runs() {
+        let folder = tempfile::tempdir().unwrap();
+        let repo = sample_repository(folder.path());
+        let mut app = repository_app(folder.path());
+        app.open_screen(Screen::Repositories);
+        app.focus = Focus::Main;
+        app.open_repo(repo.clone());
+        select_repo_row(&mut app, |row| matches!(row, RepoRow::File(0)));
+        press(&mut app, KeyCode::Char(' '));
+        assert!(matches!(app.popup, Some(Popup::Confirm(_))));
+        let shown = screen(&mut app, 160, 40);
+        for text in ["Stage 1 file in sample", "add --all -- new.txt"] {
+            assert!(shown.contains(text), "{text}: {shown}");
+        }
+        // Declined: nothing is staged.
+        press(&mut app, KeyCode::Char('n'));
+        assert!(!matches!(app.popup, Some(Popup::Running(_))));
+        let staged = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["diff", "--cached", "--name-only"])
+            .output()
+            .unwrap();
+        assert!(staged.stdout.is_empty());
+        // A commit with nothing staged says why.
+        press(&mut app, KeyCode::Char('c'));
+        assert!(matches!(
+            app.popup,
+            Some(Popup::Ask(_, Asked::CommitMessage))
+        ));
+        app.answered(Asked::CommitMessage, "Second");
+        assert!(screen(&mut app, 160, 40).contains("nothing is staged"));
+        press(&mut app, KeyCode::Esc);
+        // A command of the user's becomes a task, reviewed before it runs.
+        press(&mut app, KeyCode::Char('n'));
+        assert!(matches!(app.popup, Some(Popup::Ask(_, Asked::AddTask))));
+        app.answered(Asked::AddTask, "sh -c 'echo hi'");
+        let kept = std::fs::read_to_string(folder.path().join("workspaces.toml")).unwrap();
+        assert!(kept.contains("id = \"sh-c-echo-hi\""), "{kept}");
+        press(&mut app, KeyCode::Esc);
+        select_repo_row(&mut app, |row| matches!(row, RepoRow::Task(0)));
+        press(&mut app, KeyCode::Enter);
+        assert!(matches!(app.popup, Some(Popup::Confirm(_))));
+        assert!(screen(&mut app, 160, 40).contains("sh -c 'echo hi'"));
+        press(&mut app, KeyCode::Char('n'));
+        // x takes the task away again.
+        press(&mut app, KeyCode::Char('x'));
+        let kept = std::fs::read_to_string(folder.path().join("workspaces.toml")).unwrap();
+        assert!(!kept.contains("sh-c-echo-hi"), "{kept}");
     }
 
     #[test]

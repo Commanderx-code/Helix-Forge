@@ -1,7 +1,7 @@
 // Sample answers for working on the interface in a browser, where there is
 // no Tauri side. Nothing here reads or changes the machine.
 
-import type { AreaView, ChangesView, EntryView, ItemView, Migration, MigrationExportView, PerformanceView, Prepared, RecordView, RecoveryView, ResticView, ResticNode, ResticHistory, RunEvent, TranslationView, ServicesView, StatusView, StorageView, WindowTheme } from './types';
+import type { AreaView, ChangesView, EntryView, ItemView, Migration, MigrationExportView, PerformanceView, Prepared, RecordView, RecoveryView, RepositoryView, ReposView, ResticView, ResticNode, ResticHistory, RunEvent, TranslationView, ServicesView, StatusView, StorageView, WindowTheme } from './types';
 
 const entry = (id: string, name: string, description: string, flags = 'I', extra: Partial<EntryView> = {}): ItemView => ({
   type: 'entry',
@@ -501,6 +501,55 @@ export async function call(command: string, args: Record<string, unknown> = {}):
           { id: 'own-files', title: 'Your own files', health: 'notice', health_label: 'Notice', summary: 'Nothing Helix Toolbox knows of backs up your home folder', evidence: [], advice: 'A backup program such as Pika Backup, Déjà Dup, Borg or restic, copying to another disk, keeps your own files when the disk does not.', repair: null, entry: null },
         ],
       } satisfies RecoveryView;
+    case 'read_repositories':
+      return {
+        roots: ['/home/me/github', '/home/me/dotfiles'],
+        depth: 3,
+        origin: 'default',
+        repositories: [
+          { name: 'helix-toolbox', path: '/home/me/github/helix-toolbox', branch: 'main', changed: 2, upstream: 'origin/main', ahead: 1, behind: 0, last: 'Helix Toolbox 1.19.0', last_at: 1_792_600_000, origin: 'https://github.com/me/helix-toolbox.git', problem: null, favorite: true, group: '' },
+          { name: 'dotfiles', path: '/home/me/dotfiles', branch: 'main', changed: 0, upstream: 'origin/main', ahead: 0, behind: 0, last: 'Ghostty: a smaller font', last_at: 1_792_400_000, origin: 'git@github.com:me/dotfiles.git', problem: null, favorite: false, group: '' },
+          { name: 'scratch', path: '/home/me/github/scratch', branch: null, changed: 1, upstream: null, ahead: null, behind: null, last: 'Try things', last_at: 1_790_000_000, origin: null, problem: null, favorite: false, group: '' },
+        ],
+      } satisfies ReposView;
+    case 'read_repository':
+      return {
+        summary: { name: 'helix-toolbox', path: (args.path as string) ?? '/home/me/github/helix-toolbox', branch: 'main', changed: 2, upstream: 'origin/main', ahead: 1, behind: 0, last: 'Helix Toolbox 1.19.0', last_at: 1_792_600_000, origin: 'https://github.com/me/helix-toolbox.git', problem: null },
+        changes: [
+          { path: 'README.md', original: null, state: 'modified', staged: true, unstaged: false, conflict: false },
+          { path: 'notes.txt', original: null, state: 'new', staged: false, unstaged: true, conflict: false },
+        ],
+        branches: ['main', 'topic'],
+        remotes: ['origin'],
+        stashes: [{ id: 'a1b2c3d4e5f6', name: 'stash@{0}', subject: 'On main: Halfway there' }],
+        log: [
+          { hash: 'b27349a', subject: 'Helix Toolbox 1.19.0', at: 1_792_600_000 },
+          { hash: '04b540e', subject: 'Helix Toolbox 1.18.0', at: 1_792_500_000 },
+        ],
+        head: 'b27349a0000000000000000000000000000000000',
+        branch_ref: 'refs/heads/main',
+        busy: null,
+        push_to: ['origin', 'refs/heads/main'],
+        staged_stat: ' README.md | 2 +-\n',
+        favorite: true,
+        tasks: [
+          { id: 'serve', name: 'npm run serve', command: 'npm run serve', shell: 'direct' },
+          { id: 'cargo-test', name: 'cargo test', command: 'cargo test', shell: 'direct', detected: true },
+        ],
+      } satisfies RepositoryView;
+    case 'repository_diff':
+      return { text: '--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-Old line\n+New line\n', truncated: false };
+    case 'prepare_repository_change':
+    case 'prepare_task':
+      return {
+        kind: 'ready',
+        risk: 'low',
+        privileged: false,
+        header: ['Risk: low'],
+        lines: [{ name: 'Commit 1 staged file to main', detail: "cd /home/me/github/helix-toolbox && git --literal-pathspecs commit -m 'Change the README'" }],
+      } satisfies Prepared;
+    case 'save_workspace':
+      return null;
     case 'read_migration_export':
     case 'export_migration': {
       const migration: Migration = {

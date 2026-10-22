@@ -26,6 +26,7 @@ pub enum Icon {
     Recovery,
     Migration,
     Restic,
+    Repositories,
     Settings,
     Area,
     Group,
@@ -65,6 +66,7 @@ impl Icon {
                 Icon::Recovery => "\u{f1cd}",       // life ring
                 Icon::Migration => "\u{f0ec}",      // exchange
                 Icon::Restic => "\u{f187}",         // archive
+                Icon::Repositories => "\u{f126}",   // code fork
                 Icon::Settings => "\u{f013}",       // cog
                 Icon::Area => "\u{f07b}",           // folder
                 Icon::Group => "\u{f07b}",          // folder
