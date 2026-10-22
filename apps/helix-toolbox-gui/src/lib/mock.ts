@@ -529,7 +529,7 @@ export async function call(command: string, args: Record<string, unknown> = {}):
           { kind: 'entry', id: 'htop', name: 'htop', standing: 'install', detail: 'pacman; for htop there' },
           { kind: 'entry', id: 'git', name: 'Git', standing: 'here', detail: 'pacman lists git' },
           { kind: 'entry', id: 'vlc', name: 'vlc', standing: 'unavailable', detail: 'not in the catalog here' },
-          { kind: 'package', id: 'python3-requests', name: 'python3-requests', standing: 'yours', detail: 'a dnf package; look for what Garuda Linux calls it' },
+          { kind: 'package', id: 'python3-requests', name: 'python3-requests', standing: 'yours', detail: 'named as on Fedora Linux 43; look for what Garuda Linux calls it' },
           { kind: 'package', id: 'tree', name: 'tree', standing: 'yours', detail: "pacman's repositories here have a package of this name; check it is the same" },
         ],
         install: 3,

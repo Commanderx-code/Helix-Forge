@@ -626,15 +626,17 @@ jobs:
           assert d["same_family"], d
           assert d["counts"]["install"] == 0 and d["counts"]["unavailable"] == 0, d["counts"]
           assert "ripgrep" in [item["id"] for item in d["items"] if item["kind"] == "entry"], d["items"]'
+          # htop removed again, for the migration to bring back.
           case "${{ matrix.family }}" in
-            Arch) own=arch other=fedora ;;
-            Debian) own=debian other=arch ;;
-            Fedora) own=fedora other=arch ;;
-            openSUSE) own=suse other=arch ;;
+            Arch) own=arch other=fedora; pacman -R --noconfirm htop ;;
+            Debian) own=debian other=arch; apt-get remove -y htop ;;
+            Fedora) own=fedora other=arch; dnf remove -y htop ;;
+            openSUSE) own=suse other=arch; zypper -n remove htop ;;
           esac
-          # From another family: the entry translates to this one's package
-          # (htop was removed for Drift above); that family's package and an
-          # entry this catalog lacks are left out.
+          if command -v htop; then exit 1; fi
+          # From another family: the entry translates to this one's package;
+          # that family's package and an entry this catalog lacks are left
+          # out.
           printf 'version = 1\nfrom = "Elsewhere"\nfamily = "%s"\narchitecture = "%s"\nmade = 0\nentries = ["htop", "no-such-entry"]\npackages = ["python-not-here"]\n' "$other" "$(uname -m)" > other.toml
           bin/helix-toolbox migrate show other.toml | tee other.txt
           grep -q '^Cannot be installed here (1):' other.txt

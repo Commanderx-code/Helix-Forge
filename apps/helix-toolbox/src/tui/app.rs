@@ -9768,7 +9768,7 @@ mod tests {
             "not in the catalog here",
             "Left to you (1)",
             "python3-requests",
-            "a dnf package; look for what Garuda Linux calls it",
+            "named as on Fedora Linux 43; look for what Garuda Linux calls it",
             "a Install",
         ] {
             assert!(shown.contains(text), "{text}: {shown}");

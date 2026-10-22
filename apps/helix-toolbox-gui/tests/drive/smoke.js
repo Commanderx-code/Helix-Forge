@@ -392,10 +392,14 @@
     await click('Read it');
     const part = await until('the migration read', () => withText('.part h2', 'From Fedora Linux 43')?.closest('.part'), 30000);
     const install = part.querySelector('[aria-label="To install"]');
-    if (!install?.textContent.includes('Marker') || !install.textContent.includes('com.example.Tool')) {
-      throw new Error(`to install: ${install?.textContent.trim()}`);
+    const unavailable = part.querySelector('[aria-label="Cannot be installed here"]');
+    if (!install?.textContent.includes('Marker')) throw new Error(`to install: ${install?.textContent.trim()}`);
+    // The Flatpak is installed where Flatpak is; the workflow's runner has
+    // none, and the fixture catalog no entry that installs it.
+    if (!install.textContent.includes('com.example.Tool') && !unavailable?.textContent.includes('Flatpak is not installed here')) {
+      throw new Error(`the Flatpak is neither to install nor said to need Flatpak: ${part.textContent.trim()}`);
     }
-    if (!part.querySelector('[aria-label="Cannot be installed here"]')?.textContent.includes('not-in-this-catalog')) {
+    if (!unavailable?.textContent.includes('not-in-this-catalog')) {
       throw new Error('the unknown entry is not listed as unavailable');
     }
     if (!withText('.items li', 'htop')) throw new Error('the Fedora package is not listed');

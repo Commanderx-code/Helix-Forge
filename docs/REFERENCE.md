@@ -486,7 +486,8 @@ Flatpak entry, when Flatpak is missing), and, when both machines are of the
 same family, a package the repositories here have by its name. **Here
 already**: what is installed, an entry's Flatpak included. **Cannot be
 installed here**: an entry this catalog lacks or that has no package for
-this distribution. **Left to you**: the packages of another family, with
+this distribution, and Flatpaks where Flatpak is missing and no entry
+installs it. **Left to you**: the packages of another family, with
 whether the repositories here have one of the same name (it may not be
 the same software), and packages of this family the repositories do not
 have, such as ones from the AUR. A package another catalog had no entry

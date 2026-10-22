@@ -283,6 +283,7 @@ fn parse(text: &str) -> Result<Migration, Parsed> {
 fn manager_name(manager: PackageManager) -> &'static str {
     match manager {
         PackageManager::Debian => "apt",
+        PackageManager::Void => "xbps",
         manager => manager.executable(),
     }
 }
@@ -390,14 +391,24 @@ pub fn translate(
             },
         });
     }
-    // Flatpaks need Flatpak: when it is missing, its entry goes first.
+    // Flatpaks need Flatpak: when it is missing, its entry goes first, and
+    // without one they cannot be installed here.
     if flatpak_items
         .iter()
         .any(|item| item.standing == Standing::Install)
         && !(machine.on_path)("flatpak")
-        && find(FLATPAK_ENTRY).is_some()
     {
-        add_entry(&mut items, FLATPAK_ENTRY, Some("the Flatpaks"));
+        if find(FLATPAK_ENTRY).is_some() {
+            add_entry(&mut items, FLATPAK_ENTRY, Some("the Flatpaks"));
+        } else {
+            for item in &mut flatpak_items {
+                if item.standing == Standing::Install {
+                    item.standing = Standing::Unavailable;
+                    item.detail =
+                        "Flatpak is not installed here, and no entry here installs it".to_string();
+                }
+            }
+        }
     }
     items.extend(flatpak_items);
     for name in &migration.packages {
@@ -529,12 +540,8 @@ fn package_item(
         (false, _) => item(
             Standing::Yours,
             format!(
-                "a {} package; look for what {} calls it",
-                migration
-                    .family
-                    .map(|family| manager_name(family).to_string())
-                    .unwrap_or_else(|| migration.from.clone()),
-                platform.pretty_name
+                "named as on {}; look for what {} calls it",
+                migration.from, platform.pretty_name
             ),
         ),
     }
@@ -943,7 +950,11 @@ mod tests {
                 .detail
                 .contains("have a package of this name")
         );
-        assert!(translated.items[8].detail.contains("a pacman package"));
+        assert!(
+            translated.items[8]
+                .detail
+                .contains("named as on Arch Linux")
+        );
         assert_eq!(
             translated.items[5].detail,
             "FIREFOX is here: dnf lists firefox"
@@ -1027,6 +1038,9 @@ mod tests {
                 .filter(|item| item.kind == Kind::Package && item.id != "nano")
                 .all(|item| item.standing == Standing::Yours)
         );
+        // Nor, with no Flatpak and no entry for it, are the Flatpaks.
+        assert_eq!(unread.items[0].id, "com.spotify.Client");
+        assert_eq!(unread.items[0].standing, Standing::Unavailable);
     }
 
     #[test]
