@@ -4,6 +4,28 @@ Each release is tagged `vMAJOR.MINOR.PATCH` on GitHub, with the program, its
 packages and their checksums. A release whose workflow only adopted updated
 dotfiles or Myfish sources raises the patch number and is not listed here.
 
+## v1.21.0
+
+- **The rest of the window's screens in the terminal interface.**
+  - **Helix Doctor:** counts its problems, notices and OK checks, and
+    names the commands a repair runs. Its reports are entries like any
+    other (`Space`, `d`, `p`, `v`, `*`).
+  - **Updates:** lists the package entries with an update, each to update,
+    and all of them at once.
+  - **Drift:** shows was and now, what was not compared and what this
+    machine cannot install, and `R` reviews running what is missing.
+  - **Reliability:** says what of its record could not be read.
+  - **Desktop:** gives each suggestion's note.
+  - **Services:** `d` describes an application started at login.
+  - **Migration:** says when your own packages cannot be told apart.
+  - **Restic:** `i` ignores case in a file's history, `W` backs up weekly,
+    `F` restores a snapshot and path you type, and it shows what the
+    backup leaves out.
+  - **Repositories:** a task can run with fish or bash.
+  - **Configs:** field changes collect in a draft that `c` checks, `s`
+    saves once and `x` discards.
+  - **Settings:** names its file.
+
 ## v1.20.1
 
 - **Flatpak steps answer Flatpak's question.** Flatpak asked again before
