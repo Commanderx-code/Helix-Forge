@@ -485,8 +485,8 @@ pub type Ghostty<'a> = &'a dyn Fn(&Path) -> Option<(bool, String)>;
 
 /// Check a file's text: its size and bytes, then Fastfetch's JSONC here or
 /// Ghostty's own check of a copy in `folder`, a private folder
-/// (`private_folder`).
-pub fn validate(kind: Kind, text: &str, ghostty: Ghostty, folder: &Path) -> Checked {
+/// (`private_folder`); without one, Ghostty's is not checked.
+pub fn validate(kind: Kind, text: &str, ghostty: Ghostty, folder: Option<&Path>) -> Checked {
     if text.len() > LIMIT {
         return Checked::Invalid(format!("it is larger than {} KB", LIMIT / 1000));
     }
@@ -499,8 +499,13 @@ pub fn validate(kind: Kind, text: &str, ghostty: Ghostty, folder: &Path) -> Chec
             None => Checked::Valid,
         },
         Kind::Ghostty => {
-            if prepare(folder).is_none() {
-                return Checked::Unchecked("there is no folder to check a copy in".to_string());
+            let Some(folder) = folder else {
+                return Checked::Unchecked(
+                    "there is no private folder to check a copy in".to_string(),
+                );
+            };
+            if let Err(why) = prepare(folder) {
+                return Checked::Unchecked(why);
             }
             let copy = folder.join(format!("ghostty-{}-{}.conf", std::process::id(), nanos()));
             if write_private(&copy, text.as_bytes()).is_err() {
@@ -566,14 +571,29 @@ pub fn private_folder() -> Option<PathBuf> {
     Some(crate::history::state_dir()?.join("configs"))
 }
 
-/// A folder for copies made ready: there, closed to other users, and with
-/// copies older than a day removed.
-fn prepare(folder: &Path) -> Option<()> {
-    fs::create_dir_all(folder).ok()?;
+/// A folder for copies made ready: there, a folder of this user's own and
+/// not a link (one another user made, or a link, could read or swap the
+/// copies), closed to other users, and with copies older than a day
+/// removed.
+fn prepare(folder: &Path) -> Result<(), String> {
+    let shown = folder.display();
+    fs::create_dir_all(folder).map_err(|error| format!("{shown}: {error}"))?;
+    let metadata = fs::symlink_metadata(folder).map_err(|error| format!("{shown}: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(format!(
+            "{shown} is a link or not a folder, so no copy is made there"
+        ));
+    }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(folder, fs::Permissions::from_mode(0o700)).ok()?;
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        if metadata.uid() != nix::unistd::getuid().as_raw() {
+            return Err(format!(
+                "{shown} belongs to another user, so no copy is made there"
+            ));
+        }
+        fs::set_permissions(folder, fs::Permissions::from_mode(0o700))
+            .map_err(|error| format!("{shown}: {error}"))?;
     }
     if let Ok(listing) = fs::read_dir(folder) {
         for item in listing.flatten() {
@@ -588,7 +608,7 @@ fn prepare(folder: &Path) -> Option<()> {
             }
         }
     }
-    Some(())
+    Ok(())
 }
 
 /// Now, in nanoseconds, to keep copies' names apart.
@@ -619,7 +639,7 @@ pub fn private_copy(
     text: &str,
     folder: &Path,
 ) -> Result<PathBuf, String> {
-    prepare(folder).ok_or("there is no folder for a copy")?;
+    prepare(folder)?;
     let extension = match kind {
         Kind::Ghostty => "conf",
         Kind::Fastfetch => "jsonc",
@@ -1405,10 +1425,7 @@ mod tests {
     #[test]
     fn fastfetch_jsonc_is_read_with_comments_and_trailing_commas() {
         let text = "// mine\n{\n    \"$schema\": \"x\", /* a note */\n    \"logo\": { \"source\": \"arch\" },\n    \"modules\": [\n        \"title\",\n        { \"type\": \"os\", \"format\": \"{1}\" }, // the system\n        \"memory\",\n    ],\n}\n";
-        assert_eq!(
-            validate(Kind::Fastfetch, text, &none, Path::new("/nonexistent")),
-            Checked::Valid
-        );
+        assert_eq!(validate(Kind::Fastfetch, text, &none, None), Checked::Valid);
         assert_eq!(
             fastfetch_value(text, "modules").as_deref(),
             Some("title, os, memory")
@@ -1425,7 +1442,7 @@ mod tests {
             ("{ a: 1 }", "double quotes"),
             ("{ \"a\": \"x\n\" }", "not closed"),
         ] {
-            match validate(Kind::Fastfetch, bad, &none, Path::new("/nonexistent")) {
+            match validate(Kind::Fastfetch, bad, &none, None) {
                 Checked::Invalid(said) => assert!(said.contains(why), "{bad}: {said}"),
                 other => panic!("{bad}: {other:?}"),
             }
@@ -1449,7 +1466,7 @@ mod tests {
         let changed = set(Kind::Fastfetch, &changed, "modules", "os, kernel, title").unwrap();
         assert!(changed.contains("[\n        { \"type\": \"os\", \"format\": \"{1}\" },\n        \"kernel\",\n        \"title\"\n    ]"), "{changed}");
         assert_eq!(
-            validate(Kind::Fastfetch, &changed, &none, Path::new("/nonexistent")),
+            validate(Kind::Fastfetch, &changed, &none, None),
             Checked::Valid
         );
         // An empty file, and a logo given as a name.
@@ -1487,22 +1504,55 @@ mod tests {
             })
         };
         assert_eq!(
-            validate(Kind::Ghostty, "theme = x\n", &rejects, &folder),
+            validate(Kind::Ghostty, "theme = x\n", &rejects, Some(&folder)),
             Checked::Valid
         );
-        match validate(Kind::Ghostty, "bogus = 1\n", &rejects, &folder) {
+        match validate(Kind::Ghostty, "bogus = 1\n", &rejects, Some(&folder)) {
             Checked::Invalid(why) => {
                 assert_eq!(why, "Ghostty rejected it: the file: unknown field: bogus")
             }
             other => panic!("{other:?}"),
         }
         assert!(matches!(
-            validate(Kind::Ghostty, "x = 1", &none, &folder),
+            validate(Kind::Ghostty, "x = 1", &none, Some(&folder)),
             Checked::Unchecked(_)
         ));
         // No copy is left behind.
         let left = fs::read_dir(&folder).unwrap().count();
         assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn copies_are_never_made_in_a_link_or_a_folder_of_another_user() {
+        let dir = tempfile::tempdir().unwrap();
+        let elsewhere = dir.path().join("elsewhere");
+        fs::create_dir(&elsewhere).unwrap();
+        let link = dir.path().join("configs");
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        let refused = private_copy(Kind::Ghostty, "edit", "x = 1\n", &link).unwrap_err();
+        assert!(refused.contains("is a link"), "{refused}");
+        let rejects = |_: &Path| Some((true, String::new()));
+        assert!(matches!(
+            validate(Kind::Ghostty, "x = 1\n", &rejects, Some(&link)),
+            Checked::Unchecked(_)
+        ));
+        assert!(matches!(
+            validate(Kind::Ghostty, "x = 1\n", &rejects, None),
+            Checked::Unchecked(_)
+        ));
+        assert_eq!(fs::read_dir(&elsewhere).unwrap().count(), 0);
+        // A folder of this user's own is closed to the others.
+        let own = dir.path().join("own");
+        let copy = private_copy(Kind::Ghostty, "edit", "x = 1\n", &own).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&own).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&copy).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 
     #[test]

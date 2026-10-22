@@ -55,13 +55,20 @@ pub enum ConfigCommand {
     History,
 }
 
-/// Helix Toolbox's private folder for copies of configurations.
-fn folder() -> PathBuf {
-    configs::private_folder().unwrap_or_else(|| std::env::temp_dir().join("helix-toolbox-configs"))
+/// Helix Toolbox's private folder for copies of configurations; never a
+/// shared one.
+fn folder() -> Result<PathBuf> {
+    configs::private_folder()
+        .context("there is no state folder for Helix Toolbox's private copies; nothing is saved")
 }
 
 fn checked(kind: Kind, text: &str) -> Checked {
-    configs::validate(kind, text, &configs::ghostty_here, &folder())
+    configs::validate(
+        kind,
+        text,
+        &configs::ghostty_here,
+        configs::private_folder().as_deref(),
+    )
 }
 
 /// What `config <program> --json` prints, also when the file cannot be
@@ -139,7 +146,7 @@ fn save(
     if !crate::JSON.load(std::sync::atomic::Ordering::Relaxed) {
         println!("{}", configs::diff(&located.path, before, after));
     }
-    let planned = configs::plan_save(located, &loaded.revision, after, &checked, &folder())
+    let planned = configs::plan_save(located, &loaded.revision, after, &checked, &folder()?)
         .map_err(anyhow::Error::msg)?;
     crate::confirm_and_run(catalog, platform, &planned, dry_run, yes, "SAVE")
 }
@@ -271,7 +278,7 @@ pub fn config(
         ConfigCommand::Edit { yes } => {
             let located = found.map_err(anyhow::Error::msg)?;
             let loaded = configs::read(&located).map_err(anyhow::Error::msg)?;
-            let copy = configs::private_copy(kind, "edit", &loaded.content, &folder())
+            let copy = configs::private_copy(kind, "edit", &loaded.content, &folder()?)
                 .map_err(anyhow::Error::msg)?;
             let editor = std::env::var("VISUAL")
                 .ok()

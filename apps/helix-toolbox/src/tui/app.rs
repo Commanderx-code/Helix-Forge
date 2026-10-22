@@ -9236,12 +9236,15 @@ impl App {
     }
 
     /// The private folder for copies: the tests' own, else beside the
-    /// history.
-    fn copies_folder(&self) -> PathBuf {
-        self.config_folder
-            .clone()
-            .or_else(configs::private_folder)
-            .unwrap_or_else(|| std::env::temp_dir().join("helix-toolbox-configs"))
+    /// history; never a shared one.
+    fn copies_folder(&self) -> Option<PathBuf> {
+        self.config_folder.clone().or_else(configs::private_folder)
+    }
+
+    fn no_copies_folder(&mut self) {
+        self.cannot_config(
+            "There is no state folder for Helix Toolbox's private copies; nothing is saved.".into(),
+        );
     }
 
     /// Ghostty's own check on this machine; none in tests.
@@ -9264,7 +9267,12 @@ impl App {
                     Ok(located) => {
                         let loaded = configs::read(located);
                         let checked = loaded.as_ref().ok().map(|loaded| {
-                            configs::validate(kind, &loaded.content, &check, &self.copies_folder())
+                            configs::validate(
+                                kind,
+                                &loaded.content,
+                                &check,
+                                self.copies_folder().as_deref(),
+                            )
                         });
                         (Some(loaded), checked, configs::history(located))
                     }
@@ -9396,12 +9404,10 @@ impl App {
 
     /// Check new text and review the plan that saves it.
     fn save_config(&mut self, located: &configs::Located, loaded: &configs::Loaded, after: &str) {
-        let checked = configs::validate(
-            located.kind,
-            after,
-            &self.config_check(),
-            &self.copies_folder(),
-        );
+        let Some(folder) = self.copies_folder() else {
+            return self.no_copies_folder();
+        };
+        let checked = configs::validate(located.kind, after, &self.config_check(), Some(&folder));
         if let Checked::Invalid(why) = &checked {
             return self.cannot_config(format!("Not saved: {why}."));
         }
@@ -9413,13 +9419,7 @@ impl App {
             )));
             return;
         }
-        match configs::plan_save(
-            located,
-            &loaded.revision,
-            after,
-            &checked,
-            &self.copies_folder(),
-        ) {
+        match configs::plan_save(located, &loaded.revision, after, &checked, &folder) {
             Ok(planned) => self.confirm_plan(Ok(planned)),
             Err(why) => self.cannot_config(why),
         }
@@ -9432,8 +9432,10 @@ impl App {
             Ok(ready) => ready,
             Err(why) => return self.cannot_config(why),
         };
-        let copy = match configs::private_copy(kind, "edit", &loaded.content, &self.copies_folder())
-        {
+        let Some(folder) = self.copies_folder() else {
+            return self.no_copies_folder();
+        };
+        let copy = match configs::private_copy(kind, "edit", &loaded.content, &folder) {
             Ok(copy) => copy,
             Err(why) => return self.cannot_config(why),
         };
