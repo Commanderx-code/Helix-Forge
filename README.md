@@ -78,6 +78,9 @@ settings, profiles and history over ([what changed](https://github.com/Commander
   started at login, each change told what it costs first; and where the disk
   space goes, with what each cleanup frees. Snapshots and bootable kernels
   are never cleaned.
+- **Repositories**: the Git repositories under your project folders, with
+  their changes, diffs, branches and stashes, staged, committed and synced
+  through reviewed plans, and each project's tasks run in its folder.
 - **Migration**: what this machine has, written to a file and read on
   another machine or distribution: catalog entries become that
   distribution's packages, Flatpaks come from Flathub, and the packages

@@ -300,6 +300,34 @@ standing, detail}]}`. `family` is the package family the file was made on
 family, architecture, made, entries, flatpaks, packages}`, entry ids,
 Flatpak ids and package names; nothing is written.
 
+## repositories
+
+`repos`: `{roots, depth, origin, repositories: [{name, path, branch,
+changed, upstream, ahead, behind, last, last_at, origin, problem, favorite,
+group}]}`. `origin` at the top says where the roots come from
+(`settings`, `Command Center`, `default`); in a repository it is
+`origin`'s address without credentials. `branch` is `null` when HEAD is
+detached; `upstream`, `ahead` and `behind` are `null` without an upstream;
+`problem` says why a repository could not be read, and is `null` otherwise.
+`last_at` is in seconds since 1970.
+
+## repository
+
+`repos show <repo>`: `{summary, files: [{path, original, staged,
+unstaged, conflict}], branches, remotes, stashes: [{id, name, subject}],
+log: [{hash, subject, at}], head, branch_ref, index_tree, busy, push_to,
+staged_stat, tasks: [{id, name, command, shell, detected}]}`. `staged` and
+`unstaged` are git's status letters (` `, `M`, `A`, `D`, `R`, `C`, `U`,
+`?`); `busy` names a merge, rebase, cherry-pick or revert under way;
+`push_to` is `[remote, ref]` or `null`; `shell` is `direct`, `fish` or
+`bash`, and `detected` is true for a task found in a manifest. `repos
+tasks` is `tasks`: `{repository, tasks}`.
+
+## diff
+
+`repos diff <repo> [file]`: `{text, truncated}`, the patch as git prints
+it (an untracked file as its lines), `truncated` when it was cut short.
+
 ## hardware_report
 
 `report --worked <entry>`: `{entries: [{id, name}], machine, system,

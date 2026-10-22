@@ -4,6 +4,24 @@ Each release is tagged `vMAJOR.MINOR.PATCH` on GitHub, with the program, its
 packages and their checksums. A release whose workflow only adopted updated
 dotfiles or Myfish sources raises the patch number and is not listed here.
 
+## v1.20.0
+
+- **Repositories and project workspaces.** **Repositories**, in the window
+  and the terminal interface, lists the Git repositories under your project
+  folders (`~/github`, `~/projects`, `~/src`, `~/code` and `~/dotfiles`, or
+  `[repositories] roots` in `settings.toml`; Command Center's folders when
+  it was set up), each with its branch, changes and how it stands against
+  its upstream. One repository shows its changed files and their diffs, its
+  branches, stashes and recent commits, and its tasks: those its
+  `package.json`, Cargo, Makefile or justfile names, found without running
+  anything, and commands of your own. Staging, committing, creating and
+  switching branches, stashing and applying a stash, fetching, pulling
+  (fast-forward only) and pushing (never forced), and running a task are
+  plans, reviewed first, that check again when they run that the repository
+  is as the review showed it. Reading never runs the repository's hooks or
+  content filters. Favorites are listed first. `helix-toolbox repos` does
+  the same.
+
 ## v1.19.0
 
 - **Migration.** **Migration**, in the window and the terminal interface,

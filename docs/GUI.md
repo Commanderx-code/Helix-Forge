@@ -138,6 +138,13 @@ The other tools, under **More tools** in the sidebar:
   **Read it**) to read one made on another machine: what it would install here, what is here already, what
   cannot be, and the packages left to you, with **Install…** to review the
   plan.
+- **Repositories**: the Git repositories under your project folders,
+  favorites (the star) first; one opened shows its changes with **Diff**
+  and **Stage…** or **Unstage…**, **Stage every change…**, a commit message
+  and **Commit…**, **Fetch…**, **Pull…** and **Push…** (or **Publish…**),
+  its branches with **Switch…** and **Create…**, its stashes with
+  **Apply…** and **Stash…**, its tasks with **Run…** and **Keep** for a
+  command of your own, and its recent commits.
 - **Offline bundles**: the Install Plan's entries and the packages they
   need, downloaded with Helix Toolbox into a new folder for a machine of
   the same distribution without reliable internet. **Check what it
@@ -254,6 +261,7 @@ Its commands:
 | `read_storage`, `prepare_clean` | `helix-toolbox storage`: the space, what can be cleaned, and a cleanup's plan |
 | `read_performance`, `compare_boots` | `helix-toolbox performance`: this boot, recorded, with the machine now and the boots recorded; one boot beside another |
 | `read_recovery`, `prepare_snapshot_check` | `helix-toolbox recovery`: the readiness checks, and the snapshot check's plan |
+| `read_repositories`, `read_repository`, `repository_diff`, `prepare_repository_change`, `prepare_task`, `save_workspace` | `helix-toolbox repos`: the repositories found, one in full, a diff, a change's plan, a task's plan, and favorites and tasks kept in `workspaces.toml`; only repositories among those found are taken |
 | `read_migration_export`, `export_migration`, `open_migration`, `prepare_migration` | `helix-toolbox migrate`: what this machine would export, written to a file, a migration file read here, and its install plan; the file is chosen in the file chooser unless a path is given |
 | `check_entry` | `helix-toolbox verify` for one entry, as text: **Check it now** in an entry's details |
 | `hardware_report`, `open_issue` | `helix-toolbox report --worked` for a run or an entry, and its issue opened by `xdg-open`, outside the AppImage's own libraries |

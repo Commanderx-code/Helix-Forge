@@ -52,6 +52,18 @@ The items:
     replaces a copy the user keeps outside any package tool, and the
     window's AppImage.
 
+## v1.20.0: Command Center brought in
+
+- [x] A Git repositories dashboard: the repositories under the project
+      folders with their branch, changes and upstream; one repository's
+      files, diffs, branches, stashes and commits; staging, commits,
+      branches, stashes, fetch, pull and push as reviewed plans checked
+      again when they run, and reading that never runs a repository's hooks
+      or filters
+- [x] Project workspaces: tasks found in `package.json`, Cargo, Makefiles
+      and justfiles without running them, your own kept with favorites in
+      `workspaces.toml`, each run in its folder after review
+
 ## v1.19.0: moving machines
 
 - [x] A migration hub: what this machine has, exported to a file, and that
