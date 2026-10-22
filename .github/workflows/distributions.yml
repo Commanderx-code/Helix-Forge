@@ -693,7 +693,7 @@ jobs:
           grep -q '^FAIL: ' fail.txt
           bin/helix-toolbox restic check --yes
           # Restoring without overwriting needs restic 0.17 or later.
-          if restic restore --help | grep -q -- '--verify'; then
+          if restic restore --help | grep -q -- '--overwrite' && restic restore --help | grep -q -- '--verify'; then
             bin/helix-toolbox restic restore "$first" "$HOME/hf-restored" --include "$HOME/hf-restic/notes.txt" --yes
             [ "$(cat "$HOME/hf-restored$HOME/hf-restic/notes.txt")" = first ]
             [ "$(cat "$HOME/hf-restic/notes.txt")" = second ]
