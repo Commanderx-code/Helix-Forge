@@ -4,6 +4,7 @@
 
 mod app;
 mod banner;
+mod clipboard;
 mod effects;
 mod hints;
 pub mod icons;

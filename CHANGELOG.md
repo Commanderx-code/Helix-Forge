@@ -6,6 +6,13 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
 
 ## v1.21.0
 
+- **The terminal interface's running window shows each step.** Beside the
+  terminal, every step of the run is listed as waiting, running, done,
+  failed with its exit status, or skipped, with a bar of how many have
+  ended. The run's warnings, which it used to drop, are shown, and at the
+  end the result and every check, failures first and those done after the
+  reboot or not checked here marked so, as in the window. `c` copies the bug
+  report and the hardware report.
 - **The mouse in the terminal interface.** A click opens a screen from the
   sidebar, selects a row, and on the row already selected does what `Enter`
   does, which still asks first. A click on a key hint presses that key, and
