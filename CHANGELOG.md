@@ -4,6 +4,20 @@ Each release is tagged `vMAJOR.MINOR.PATCH` on GitHub, with the program, its
 packages and their checksums. A release whose workflow only adopted updated
 dotfiles or Myfish sources raises the patch number and is not listed here.
 
+## v1.21.1
+
+- **Installers trust only the repositories and keys they name.** Thorium's
+  apt source is written locally over HTTPS instead of fetched over HTTP as
+  root. The Chrome, Sublime Text, FreeOffice, Brave Origin, Vivaldi and
+  podman-compose installers import their vendor's signing keys pinned by
+  fingerprint, from HTTPS, and refresh only the repository they add: no
+  `apt-key` and no `--gpg-auto-import-keys` refresh of every repository.
+  The Resolve installer's NVIDIA keyring holds only the pinned key, whatever
+  else the downloaded file carries. The bootable USB creator saves a
+  download under a plain name in a folder of its own, from HTTPS only, and
+  `start.sh` piped to `sh` always runs the checksum-checked release instead
+  of building whatever Cargo project the current folder holds.
+
 ## v1.21.0
 
 - **The terminal interface's running window shows each step.** Beside the
