@@ -171,10 +171,10 @@ fn walk(folder: &Path, depth: usize, found: &mut Vec<PathBuf>, seen: &mut HashSe
 
 /// Runs git for the probes, so tests can stand in for it.
 pub trait Git: Sync {
-    /// git with these arguments; its success and standard output, cut off
-    /// at `OUTPUT_CAP` (the flag says so). None when it could not run or
-    /// took too long.
-    fn run(&self, args: &[String]) -> Option<Output>;
+    /// git with these arguments and variables; its success and standard
+    /// output, cut off at `OUTPUT_CAP` (the flag says so). None when it
+    /// could not run or took too long.
+    fn run(&self, args: &[String], environment: &[(String, String)]) -> Option<Output>;
 }
 
 #[derive(Clone, Debug, Default)]
@@ -189,9 +189,10 @@ pub struct Output {
 pub struct Here;
 
 impl Git for Here {
-    fn run(&self, args: &[String]) -> Option<Output> {
+    fn run(&self, args: &[String], environment: &[(String, String)]) -> Option<Output> {
         let mut child = Command::new("git")
             .args(args)
+            .envs(environment.iter().map(|(key, value)| (key, value)))
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_OPTIONAL_LOCKS", "0")
             .env("GIT_NO_LAZY_FETCH", "1")
@@ -251,56 +252,73 @@ impl Git for Here {
 struct Probe<'a> {
     git: &'a dyn Git,
     base: Vec<String>,
+    /// Settings given through the environment, whose keys may hold any
+    /// character: `-c` splits a key from its value at the first `=`.
+    settings: Vec<(String, String)>,
 }
 
 impl<'a> Probe<'a> {
-    fn new(git: &'a dyn Git, repo: &Path) -> Self {
+    /// The probe, once the repository's content filters are known and
+    /// emptied; none when they cannot be known, so nothing that could run
+    /// one is asked.
+    fn new(git: &'a dyn Git, repo: &Path) -> Result<Self, String> {
         let mut base: Vec<String> = vec!["-C".into(), repo.to_string_lossy().into_owned()];
         for setting in [
             "core.fsmonitor=false",
             "core.hooksPath=/dev/null",
             "log.showSignature=false",
             "diff.submodule=short",
+            "diff.ignoreSubmodules=dirty",
+            "submodule.recurse=false",
         ] {
             base.push("-c".into());
             base.push(setting.into());
         }
         let mut probe = Probe {
             git,
-            base: base.clone(),
+            base,
+            settings: Vec::new(),
         };
         // A content filter runs a program of the repository's choosing on
         // status and diff: each one the configuration names is emptied.
-        if let Some(names) =
-            probe.text(&["config", "--includes", "--null", "--name-only", "--list"])
-        {
-            let mut filters: Vec<String> = names
-                .split('\0')
-                .filter_map(|name| name.strip_prefix("filter."))
-                .filter_map(|rest| rest.rsplit_once('.').map(|(name, _)| name.to_string()))
-                .collect();
-            filters.sort();
-            filters.dedup();
-            for name in filters {
-                for (key, value) in [
-                    ("clean", ""),
-                    ("smudge", ""),
-                    ("process", ""),
-                    ("required", "false"),
-                ] {
-                    base.push("-c".into());
-                    base.push(format!("filter.{name}.{key}={value}"));
-                }
+        let listed = probe
+            .output(&["config", "--includes", "--null", "--name-only", "--list"])
+            .filter(|listed| listed.success && !listed.truncated && !listed.stdout.is_empty())
+            .ok_or("its settings cannot be read, so it is not looked into")?;
+        let mut filters: Vec<String> = String::from_utf8_lossy(&listed.stdout)
+            .split('\0')
+            .filter_map(|name| name.strip_prefix("filter."))
+            .filter_map(|rest| rest.rsplit_once('.').map(|(name, _)| name.to_string()))
+            .collect();
+        filters.sort();
+        filters.dedup();
+        for name in filters {
+            for (key, value) in [
+                ("clean", ""),
+                ("smudge", ""),
+                ("process", ""),
+                ("required", "false"),
+            ] {
+                probe
+                    .settings
+                    .push((format!("filter.{name}.{key}"), value.to_string()));
             }
         }
-        probe.base = base;
-        probe
+        Ok(probe)
     }
 
     fn output(&self, args: &[&str]) -> Option<Output> {
         let mut all = self.base.clone();
         all.extend(args.iter().map(|arg| arg.to_string()));
-        self.git.run(&all)
+        let mut environment = vec![(
+            "GIT_CONFIG_COUNT".to_string(),
+            self.settings.len().to_string(),
+        )];
+        for (index, (key, value)) in self.settings.iter().enumerate() {
+            environment.push((format!("GIT_CONFIG_KEY_{index}"), key.clone()));
+            environment.push((format!("GIT_CONFIG_VALUE_{index}"), value.clone()));
+        }
+        self.git.run(&all, &environment)
     }
 
     /// Standard output when git succeeded.
@@ -358,11 +376,21 @@ fn without_credentials(address: &str) -> String {
 
 /// The repository's name, branch, changes, upstream and latest commit.
 pub fn summary(git: &dyn Git, repo: &Path) -> Summary {
-    let probe = Probe::new(git, repo);
     let name = repo
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| repo.display().to_string());
+    let probe = match Probe::new(git, repo) {
+        Ok(probe) => probe,
+        Err(problem) => {
+            return Summary {
+                name,
+                path: repo.to_path_buf(),
+                problem: Some(problem),
+                ..Summary::default()
+            };
+        }
+    };
     let Some(status) = probe.output(&[
         "status",
         "--porcelain=v1",
@@ -604,7 +632,7 @@ fn busy(git_dir: &Path) -> Option<String> {
 
 /// Everything about one repository the dashboard shows.
 pub fn details(git: &dyn Git, repo: &Path) -> Result<Details, String> {
-    let probe = Probe::new(git, repo);
+    let probe = Probe::new(git, repo)?;
     let status = probe
         .output(&[
             "status",
@@ -679,6 +707,7 @@ pub fn details(git: &dyn Git, repo: &Path) -> Result<Details, String> {
                 "--cached",
                 "--no-ext-diff",
                 "--no-textconv",
+                "--ignore-submodules=dirty",
                 "--stat",
             ])
             .unwrap_or_default(),
@@ -706,12 +735,13 @@ pub fn diff(
     file: Option<&str>,
     staged: bool,
 ) -> Result<Diff, String> {
-    let probe = Probe::new(git, repo);
+    let probe = Probe::new(git, repo)?;
     let mut args: Vec<&str> = vec![
         "--literal-pathspecs",
         "diff",
         "--no-ext-diff",
         "--no-textconv",
+        "--ignore-submodules=dirty",
         "--no-color",
         "--patch",
     ];
@@ -804,9 +834,11 @@ pub fn valid_branch(git: &dyn Git, repo: &Path, name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 200
         && !name.starts_with('-')
-        && Probe::new(git, repo)
-            .output(&["check-ref-format", &format!("refs/heads/{name}")])
-            .is_some_and(|output| output.success)
+        && Probe::new(git, repo).is_ok_and(|probe| {
+            probe
+                .output(&["check-ref-format", &format!("refs/heads/{name}")])
+                .is_some_and(|output| output.success)
+        })
 }
 
 /// The plan for a change, from the repository as it was read; the run
@@ -1347,6 +1379,66 @@ mod tests {
         );
         assert!(diff(&Here, &repo, &found, Some("../outside"), false).is_err());
         assert!(!mark.exists(), "the repository's filter ran");
+    }
+
+    #[test]
+    fn a_filter_whose_name_holds_an_equals_sign_is_not_run_either() {
+        let folder = repository();
+        let repo = folder.path().canonicalize().unwrap();
+        let mark = repo.join("ran");
+        let touch = format!("touch {}; cat", mark.display());
+        // `-c filter.a=b.clean=` would be read as the key filter.a.
+        git_in(&repo, &["config", "filter.a=b.clean", &touch]);
+        git_in(&repo, &["config", "filter.a=b.smudge", &touch]);
+        std::fs::write(repo.join(".gitattributes"), "*.txt filter=a=b\n").unwrap();
+        std::fs::write(repo.join("one.txt"), "one, changed\n").unwrap();
+        // git as it is runs the filter on a diff, so the test can see one.
+        Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["diff", "--quiet"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .unwrap();
+        assert!(
+            mark.exists(),
+            "the filter does not run, so the test proves nothing"
+        );
+        std::fs::remove_file(&mark).unwrap();
+        let listed = summaries(&Here, std::slice::from_ref(&repo));
+        assert_eq!(listed[0].problem, None);
+        let found = details(&Here, &repo).unwrap();
+        assert!(found.file("one.txt").is_some());
+        for staged in [false, true] {
+            diff(&Here, &repo, &found, None, staged).unwrap();
+            diff(&Here, &repo, &found, Some("one.txt"), staged).unwrap();
+        }
+        assert!(!mark.exists(), "a probe ran the repository's filter");
+    }
+
+    /// Stands in for git where the settings cannot be listed.
+    struct Unlisted;
+
+    impl Git for Unlisted {
+        fn run(&self, args: &[String], environment: &[(String, String)]) -> Option<Output> {
+            if args.iter().any(|arg| arg == "config") {
+                return Some(Output {
+                    success: true,
+                    stdout: b"core.bare".to_vec(),
+                    truncated: true,
+                });
+            }
+            Here.run(args, environment)
+        }
+    }
+
+    #[test]
+    fn a_repository_whose_settings_cannot_be_listed_is_not_looked_into() {
+        let folder = repository();
+        let repo = folder.path().canonicalize().unwrap();
+        assert!(summary(&Unlisted, &repo).problem.is_some());
+        assert!(details(&Unlisted, &repo).is_err());
+        assert!(summary(&Here, &repo).problem.is_none());
     }
 
     #[test]
