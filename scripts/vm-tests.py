@@ -987,7 +987,8 @@ def migrate_flatpak(machine, shots):
     shown = machine.ssh('./helix-toolbox migrate show migration.toml').stdout
     if not re.search(rf'^  {re.escape(app)} +Flatpak +Flathub$', shown, re.M):
         raise RuntimeError(f'{app} is not to be installed from Flathub:\n{shown}')
-    machine.ssh('yes | ./helix-toolbox migrate apply migration.toml --yes')
+    # In a terminal, as Flatpak answers its own question only in one.
+    machine.ssh("yes | script -qec './helix-toolbox migrate apply migration.toml --yes' /dev/null")
     machine.ssh(f'flatpak info {app} >/dev/null && flatpak run --command=true {app}')
     log(f'migration: {app} exported, removed and brought back from Flathub')
 
