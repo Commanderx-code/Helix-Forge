@@ -175,6 +175,26 @@ pub trait Git: Sync {
     /// output, cut off at `OUTPUT_CAP` (the flag says so). None when it
     /// could not run or took too long.
     fn run(&self, args: &[String], environment: &[(String, String)]) -> Option<Output>;
+
+    /// Whether this git takes settings from `GIT_CONFIG_COUNT` (2.31 and
+    /// later), as the probes need to empty the content filters.
+    fn takes_settings_from_environment(&self) -> bool {
+        settings_from_environment(self)
+    }
+}
+
+/// Ask git for a setting given only through the environment.
+fn settings_from_environment(git: &(impl Git + ?Sized)) -> bool {
+    let key = "helix-toolbox.probe";
+    git.run(
+        &["config".into(), "--get".into(), key.into()],
+        &[
+            ("GIT_CONFIG_COUNT".into(), "1".into()),
+            ("GIT_CONFIG_KEY_0".into(), key.into()),
+            ("GIT_CONFIG_VALUE_0".into(), "yes".into()),
+        ],
+    )
+    .is_some_and(|output| output.success && output.stdout.trim_ascii() == b"yes")
 }
 
 #[derive(Clone, Debug, Default)]
@@ -189,6 +209,12 @@ pub struct Output {
 pub struct Here;
 
 impl Git for Here {
+    /// Asked once: git does not change while Helix Toolbox runs.
+    fn takes_settings_from_environment(&self) -> bool {
+        static TAKES: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *TAKES.get_or_init(|| settings_from_environment(self))
+    }
+
     fn run(&self, args: &[String], environment: &[(String, String)]) -> Option<Output> {
         let mut child = Command::new("git")
             .args(args)
@@ -262,6 +288,9 @@ impl<'a> Probe<'a> {
     /// emptied; none when they cannot be known, so nothing that could run
     /// one is asked.
     fn new(git: &'a dyn Git, repo: &Path) -> Result<Self, String> {
+        if !git.takes_settings_from_environment() {
+            return Err("this git is too old to read repositories safely; Helix Toolbox needs git 2.31 or later".to_string());
+        }
         let mut base: Vec<String> = vec!["-C".into(), repo.to_string_lossy().into_owned()];
         for setting in [
             "core.fsmonitor=false",
@@ -285,11 +314,23 @@ impl<'a> Probe<'a> {
             .output(&["config", "--includes", "--null", "--name-only", "--list"])
             .filter(|listed| listed.success && !listed.truncated && !listed.stdout.is_empty())
             .ok_or("its settings cannot be read, so it is not looked into")?;
-        let mut filters: Vec<String> = String::from_utf8_lossy(&listed.stdout)
-            .split('\0')
-            .filter_map(|name| name.strip_prefix("filter."))
-            .filter_map(|rest| rest.rsplit_once('.').map(|(name, _)| name.to_string()))
-            .collect();
+        // A name that is not text, or holds a line break, could not be named
+        // back to git exactly, so its filter would stay live.
+        let mut filters: Vec<String> = Vec::new();
+        for name in listed.stdout.split(|byte| *byte == 0) {
+            let Some(rest) = name.strip_prefix(b"filter.") else {
+                continue;
+            };
+            let rest = std::str::from_utf8(rest)
+                .ok()
+                .filter(|rest| !rest.contains(['\n', '\r']))
+                .ok_or(
+                    "it names a content filter that cannot be turned off, so it is not looked into",
+                )?;
+            if let Some((name, _)) = rest.rsplit_once('.') {
+                filters.push(name.to_string());
+            }
+        }
         filters.sort();
         filters.dedup();
         for name in filters {
@@ -1430,6 +1471,49 @@ mod tests {
             }
             Here.run(args, environment)
         }
+
+        fn takes_settings_from_environment(&self) -> bool {
+            true
+        }
+    }
+
+    /// Stands in for a git older than 2.31, which ignores GIT_CONFIG_COUNT.
+    struct Old;
+
+    impl Git for Old {
+        fn run(&self, args: &[String], _: &[(String, String)]) -> Option<Output> {
+            Here.run(args, &[])
+        }
+    }
+
+    #[test]
+    fn a_git_that_ignores_settings_from_the_environment_reads_nothing() {
+        let folder = repository();
+        let repo = folder.path().canonicalize().unwrap();
+        assert!(Here.takes_settings_from_environment());
+        assert!(!Old.takes_settings_from_environment());
+        let problem = summary(&Old, &repo).problem.unwrap();
+        assert!(problem.contains("git 2.31 or later"), "{problem}");
+        assert!(details(&Old, &repo).is_err());
+    }
+
+    #[test]
+    fn a_filter_whose_name_is_not_text_keeps_the_repository_closed() {
+        let folder = repository();
+        let repo = folder.path().canonicalize().unwrap();
+        let mark = repo.join("ran");
+        let mut config = std::fs::read(repo.join(".git/config")).unwrap();
+        config.extend_from_slice(b"[filter \"a\xffb\"]\n\tclean = touch ");
+        config.extend_from_slice(mark.display().to_string().as_bytes());
+        config.extend_from_slice(b"; cat\n");
+        std::fs::write(repo.join(".git/config"), config).unwrap();
+        let attributes = b"*.txt filter=a\xffb\n".to_vec();
+        std::fs::write(repo.join(".gitattributes"), attributes).unwrap();
+        std::fs::write(repo.join("one.txt"), "one, changed\n").unwrap();
+        let problem = summary(&Here, &repo).problem.unwrap();
+        assert!(problem.contains("cannot be turned off"), "{problem}");
+        assert!(details(&Here, &repo).is_err());
+        assert!(!mark.exists(), "a probe ran the repository's filter");
     }
 
     #[test]
