@@ -14,6 +14,17 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   family's package files, and every Debian package apt is handed must be in
   the machine's signed repository index, where a file not named `.deb` had
   gone to apt unchecked. Either is refused unless `--trust-bundle` is given.
+- **Installers trust only the repositories and keys they name.** Thorium's
+  apt source is written locally over HTTPS instead of fetched over HTTP as
+  root. The Chrome, Sublime Text, FreeOffice, Brave Origin, Vivaldi and
+  podman-compose installers import their vendor's signing keys pinned by
+  fingerprint, from HTTPS, and refresh only the repository they add: no
+  `apt-key` and no `--gpg-auto-import-keys` refresh of every repository.
+  The Resolve installer's NVIDIA keyring holds only the pinned key, whatever
+  else the downloaded file carries. The bootable USB creator saves a
+  download under a plain name in a folder of its own, from HTTPS only, and
+  `start.sh` piped to `sh` always runs the checksum-checked release instead
+  of building whatever Cargo project the current folder holds.
 - **Passwords off the command line and the screen.** The file encryption
   tool hands its password to OpenSSL on a descriptor, not its command line
   where other local users could read it, asks for it without showing it and
