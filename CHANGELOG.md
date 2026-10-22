@@ -4,6 +4,15 @@ Each release is tagged `vMAJOR.MINOR.PATCH` on GitHub, with the program, its
 packages and their checksums. A release whose workflow only adopted updated
 dotfiles or Myfish sources raises the patch number and is not listed here.
 
+## v1.21.0
+
+- **The mouse in the terminal interface.** A click opens a screen from the
+  sidebar, selects a row, and on the row already selected does what `Enter`
+  does, which still asks first. A click on a key hint presses that key, and
+  the wheel scrolls lists, popups and a run's output. Settings, or the
+  command palette, turns it off to leave the mouse to the terminal; most
+  terminals select text with `Shift` held meanwhile.
+
 ## v1.20.1
 
 - **Flatpak steps answer Flatpak's question.** Flatpak asked again before

@@ -27,6 +27,16 @@ at that check, `save this machine as a baseline`, `clear the install plan`,
 `change the theme`) and every entry (`install ghostty`), loose spellings
 included. An entry chosen there is planned and confirmed like any other.
 
+The mouse works too. A click on a sidebar item opens that screen; a click
+on a row selects it, and a click on the row already selected does what
+`Enter` does, so an entry or a plan still opens its confirmation first and
+a word you must type is still typed. A click on a key hint at the bottom
+presses that key, and the wheel scrolls the list, a popup or the output of
+a run. A click outside a popup does nothing. While the interface has the
+mouse, most terminals still select text with `Shift` held down; Settings
+(**Mouse**) or `Ctrl-K` "turn the mouse off" leaves the mouse to the
+terminal, and the choice is remembered.
+
 Search ranks what it finds: names that match exactly or start with the
 text first, then names containing it, ids, loose spellings (`rpgrp` finds
 Ripgrep) and descriptions. `Escape` clears it and goes back to the row you

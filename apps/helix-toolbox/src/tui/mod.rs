@@ -7,6 +7,7 @@ mod banner;
 mod effects;
 mod hints;
 pub mod icons;
+mod mouse;
 mod palette;
 mod popup;
 mod running;
@@ -17,7 +18,10 @@ mod wizard;
 use crate::TuiArgs;
 use anyhow::Result;
 use app::App;
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::{
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind},
+    execute,
+};
 use helix_toolbox_catalog::Catalog;
 use helix_toolbox_platform::LinuxInfo;
 use std::time::Duration;
@@ -29,6 +33,13 @@ pub fn run(catalog: Catalog, platform: LinuxInfo, args: TuiArgs) -> Result<()> {
         .remembering(look, path, &args)
         .with_status_checks();
     let mut terminal = ratatui::init();
+    // The terminal stops reporting the mouse however the interface ends,
+    // a panic included.
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = execute!(std::io::stdout(), DisableMouseCapture);
+        hook(info);
+    }));
     // After the terminal is set up and before the first key is read.
     let banner = banner::detect().and_then(|picker| banner::encode(&picker));
     let mut app = app.with_banner(banner);
@@ -36,12 +47,39 @@ pub fn run(catalog: Catalog, platform: LinuxInfo, args: TuiArgs) -> Result<()> {
     if app.first_run() {
         app.open_wizard(true);
     }
-    let result = event_loop(&mut terminal, &mut app);
+    let mut mouse = Mouse(false);
+    let result = event_loop(&mut terminal, &mut app, &mut mouse);
+    mouse.set(false);
     ratatui::restore();
     result
 }
 
-fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
+/// Whether the terminal reports the mouse, as the setting asks.
+struct Mouse(bool);
+
+impl Mouse {
+    fn set(&mut self, on: bool) {
+        if on == self.0 {
+            return;
+        }
+        let done = if on {
+            execute!(std::io::stdout(), EnableMouseCapture)
+        } else {
+            execute!(std::io::stdout(), DisableMouseCapture)
+        };
+        if let Err(error) = done {
+            tracing::warn!(%error, "the terminal's mouse reporting did not change");
+        }
+        self.0 = on;
+    }
+}
+
+fn event_loop(
+    terminal: &mut ratatui::DefaultTerminal,
+    app: &mut App,
+    mouse: &mut Mouse,
+) -> Result<()> {
+    mouse.set(app.mouse());
     terminal.draw(|frame| app.draw(frame))?;
     loop {
         if !event::poll(Duration::from_millis(10))? {
@@ -51,39 +89,43 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
             }
             continue;
         }
-        match event::read()? {
+        let going_on = match event::read()? {
             Event::Key(key)
                 if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat =>
             {
-                if !app.handle_key(&key) {
-                    return Ok(());
-                }
-                // A configuration to edit: the terminal goes to the user's
-                // editor, then comes back.
-                if let Some(request) = app.take_edit() {
-                    ratatui::restore();
-                    let closed = std::process::Command::new("sh")
-                        .arg("-c")
-                        .arg(format!("{} \"$1\"", request.editor))
-                        .arg("sh")
-                        .arg(&request.copy)
-                        .status()
-                        .map_err(|error| format!("{} cannot start: {error}", request.editor))
-                        .and_then(|status| {
-                            if status.success() {
-                                Ok(())
-                            } else {
-                                Err(format!("{} exited with {status}", request.editor))
-                            }
-                        });
-                    *terminal = ratatui::init();
-                    terminal.clear()?;
-                    app.edited(request, closed);
-                }
+                app.handle_key(&key)
             }
-            Event::Resize(..) => {}
+            Event::Mouse(event) => app.handle_mouse(&event),
+            Event::Resize(..) => true,
             _ => continue,
+        };
+        if !going_on {
+            return Ok(());
         }
+        // A configuration to edit: the terminal goes to the user's editor,
+        // then comes back.
+        if let Some(request) = app.take_edit() {
+            mouse.set(false);
+            ratatui::restore();
+            let closed = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(format!("{} \"$1\"", request.editor))
+                .arg("sh")
+                .arg(&request.copy)
+                .status()
+                .map_err(|error| format!("{} cannot start: {error}", request.editor))
+                .and_then(|status| {
+                    if status.success() {
+                        Ok(())
+                    } else {
+                        Err(format!("{} exited with {status}", request.editor))
+                    }
+                });
+            *terminal = ratatui::init();
+            terminal.clear()?;
+            app.edited(request, closed);
+        }
+        mouse.set(app.mouse());
         terminal.draw(|frame| app.draw(frame))?;
     }
 }
