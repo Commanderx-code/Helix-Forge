@@ -653,6 +653,62 @@ jobs:
           assert [(item["id"], item["standing"]) for item in items] in ([("tree", "install")], [("tree", "here")]), items'
           yes | bin/helix-toolbox migrate apply own.toml --yes
           command -v tree
+      - name: Restic backups, a file's history, recovery tests and a restore into a new folder, for real
+        run: |
+          case "${{ matrix.family }}" in
+            Arch) pacman -S --noconfirm --needed restic ;;
+            Debian) apt-get install -y restic ;;
+            Fedora) dnf install -y restic ;;
+            openSUSE) zypper -n install restic ;;
+          esac
+          # A scratch repository, named in Helix Toolbox's settings with its
+          # password file; the backup takes one folder.
+          printf 'secret\n' > "$HOME/.restic-password"
+          restic init -q --repo "$HOME/restic-repo" --password-file "$HOME/.restic-password"
+          mkdir -p "$HOME/hf-restic"
+          printf 'first\n' > "$HOME/hf-restic/notes.txt"
+          config="${XDG_CONFIG_HOME:-$HOME/.config}/helix-toolbox"
+          mkdir -p "$config"
+          printf '\n[restic]\nrepository = "~/restic-repo"\npassword_file = "~/.restic-password"\npaths = ["~/hf-restic"]\n' >> "$config/settings.toml"
+          bin/helix-toolbox restic backup --yes
+          bin/helix-toolbox restic baseline "$HOME/hf-restic/notes.txt"
+          printf 'second\n' > "$HOME/hf-restic/notes.txt"
+          bin/helix-toolbox restic backup --yes
+          bin/helix-toolbox restic
+          bin/helix-toolbox --json restic > restic.json
+          python3 -c 'import json; d = json.load(open("restic.json"))["data"]; assert d["configured"] and d["origin"] == "settings" and len(d["snapshots"]) == 2, d'
+          first=$(python3 -c 'import json; print(json.load(open("restic.json"))["data"]["snapshots"][-1]["short_id"])')
+          bin/helix-toolbox restic files latest | grep -q 'notes.txt'
+          bin/helix-toolbox restic history notes.txt | tee history.txt
+          grep -qE ' changed$' history.txt
+          grep -qE ' first$' history.txt
+          # The first snapshot's copy matches the baseline; the latest's,
+          # changed since, does not.
+          bin/helix-toolbox restic test 1 "$first" --yes | tee pass.txt
+          grep -q '^PASS: ' pass.txt
+          if bin/helix-toolbox restic test 1 --yes > fail.txt; then
+            echo "a recovery test of a changed file passed" >&2
+            exit 1
+          fi
+          grep -q '^FAIL: ' fail.txt
+          bin/helix-toolbox restic check --yes
+          # Restoring without overwriting needs restic 0.17 or later.
+          if restic restore --help | grep -q -- '--overwrite' && restic restore --help | grep -q -- '--verify'; then
+            bin/helix-toolbox restic restore "$first" "$HOME/hf-restored" --include "$HOME/hf-restic/notes.txt" --yes
+            [ "$(cat "$HOME/hf-restored$HOME/hf-restic/notes.txt")" = first ]
+            [ "$(cat "$HOME/hf-restic/notes.txt")" = second ]
+            if bin/helix-toolbox restic restore latest "$HOME/hf-restored" --yes 2> refused.txt; then
+              echo "a restore went into a folder that is there" >&2
+              exit 1
+            fi
+            grep -q 'is there already' refused.txt
+          else
+            if bin/helix-toolbox restic restore latest "$HOME/hf-new" --dry-run 2> refused.txt; then
+              echo "an older restic was trusted to restore" >&2
+              exit 1
+            fi
+            grep -q 'restic 0.17 or later' refused.txt
+          fi
       - name: Script and native entries
         run: |
           bin/helix-toolbox run system-report machine-summary --yes | tee report.txt

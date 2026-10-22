@@ -195,7 +195,7 @@
     await until('the focus back on Marker', () => document.activeElement === marker);
   });
 
-  const screens = ['Updates','Backups', 'Drift', 'Reliability', 'Hardware', 'Services', 'Storage', 'Performance', 'Recovery', 'Migration', 'Desktop', 'History', 'Favorites', 'Dashboard'];
+  const screens = ['Updates','Backups', 'Drift', 'Reliability', 'Hardware', 'Services', 'Storage', 'Performance', 'Recovery', 'Migration', 'Restic', 'Desktop', 'History', 'Favorites', 'Dashboard'];
   for (const name of screens) {
     await step(`the ${name} screen opens`, async () => {
       await click(name, document.querySelector('nav'));
@@ -411,6 +411,45 @@
     await click(button('Cancel', review) ? 'Cancel' : 'OK', review);
     await until('the review to close', () => !document.querySelector('#confirm-title'));
     return `exported; ${install.querySelectorAll('li').length} to install reviewed; nothing ran`;
+  });
+
+  await step('restic snapshots are browsed and searched, a restore and a recovery test reviewed, the timer turned on and off, and nothing runs', async () => {
+    await click('Restic', document.querySelector('nav'));
+    await until('Restic', () => screenTitle().startsWith('Restic'));
+    // scripts/gui-smoke.sh's stand-in restic answers with one snapshot.
+    const snapshot = await until('the snapshots', () => withText('[aria-label="Snapshots"] li', 'b6f77f6d'), 30000);
+    await click('Browse', snapshot);
+    const file = await until('the files', () => withText('[aria-label="Files in the snapshot"] li', 'notes.txt'), 30000);
+    await accessible('a snapshot browsed');
+    await click('Restore this', file);
+    const restore = withText('.part h2', 'Restore into a new folder').closest('.part');
+    const include = withText('.field', 'Only this path').querySelector('input');
+    if (!include.value.endsWith('/notes.txt')) throw new Error(`the path to restore: ${include.value}`);
+    await click('Restore…', restore);
+    let review = await until('the review', () => document.querySelector('#confirm-title')?.closest('[role="dialog"]'), 30000);
+    if (!review.textContent.includes('--overwrite') || !review.textContent.includes('--verify')) throw new Error(review.textContent);
+    await click(button('Cancel', review) ? 'Cancel' : 'OK', review);
+    await until('the review to close', () => !document.querySelector('#confirm-title'));
+    await type(withText('.field', 'A file name or path').querySelector('input'), 'notes.txt');
+    await click('Look for it');
+    await until('the versions', () => withText('[aria-label^="Versions of"] li', 'First'), 30000);
+    await type(withText('.field', 'A file of your home folder').querySelector('input'), '~/notes.txt');
+    await click('Record its SHA-256');
+    const baseline = await until('the baseline', () => withText('[aria-label="Baselines"] li', 'notes.txt'), 30000);
+    await click('Test…', baseline);
+    review = await until('the test', () => document.querySelector('#confirm-title')?.closest('[role="dialog"]'), 30000);
+    if (!review.textContent.includes('Test a restore against its baseline')) throw new Error(review.textContent);
+    await accessible('a recovery test under review');
+    await click(button('Cancel', review) ? 'Cancel' : 'OK', review);
+    await until('the review to close', () => !document.querySelector('#confirm-title'));
+    await click('Back up every day');
+    await until('the timer on', () => withText('#notice-title', 'Timed backup'));
+    await click('OK');
+    await click('Stop the timer');
+    await until('the timer off', () => withText('#notice-title', 'Timed backup'));
+    await click('OK');
+    await until('the timer button back', () => button('Back up every day'));
+    return 'browsed, searched, a restore and a test reviewed; the timer on and off; nothing ran';
   });
 
   await step('an entry is checked now, without changing anything', async () => {

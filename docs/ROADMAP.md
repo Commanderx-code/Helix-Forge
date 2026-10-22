@@ -52,6 +52,14 @@ The items:
     replaces a copy the user keeps outside any package tool, and the
     window's AppImage.
 
+## v1.20.0: Command Center brought in
+
+- [x] Restic backups of your own files: the snapshots, a folder of one, a
+      file's history, restores into a new folder, backups and checks as
+      plans, a timer, and recovery tests against a recorded SHA-256;
+      backed up, tested and restored for real in the distribution
+      containers
+
 ## v1.19.0: moving machines
 
 - [x] A migration hub: what this machine has, exported to a file, and that

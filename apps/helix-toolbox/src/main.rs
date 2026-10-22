@@ -12,6 +12,7 @@ mod manage;
 mod migrate;
 mod notify;
 mod report;
+mod restic;
 mod selfupdate;
 mod setup;
 mod tui;
@@ -277,6 +278,13 @@ enum Command {
     Migrate {
         #[command(subcommand)]
         action: migrate::MigrateCommand,
+    },
+    /// Restic backups of your own files: the repository and its snapshots,
+    /// the files in one, a file's history, and checks, backups, restores
+    /// into a new folder and recovery tests, each a plan you confirm.
+    Restic {
+        #[command(subcommand)]
+        action: Option<restic::ResticCommand>,
     },
     /// The hardware and firmware: fwupd's devices and the firmware updates it
     /// knows of, disks, temperatures, batteries, PCI and USB devices. It only
@@ -982,6 +990,7 @@ fn main() -> Result<()> {
             as_json,
         ),
         Command::Migrate { action } => migrate::migrate(action, &load(false)?, &platform, as_json),
+        Command::Restic { action } => restic::restic(action, &load(false)?, &platform, as_json),
         Command::Hardware {
             smart,
             firmware,

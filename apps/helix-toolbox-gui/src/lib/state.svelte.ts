@@ -22,6 +22,7 @@ export type Screen =
   | { kind: 'performance' }
   | { kind: 'recovery' }
   | { kind: 'migration' }
+  | { kind: 'restic' }
   | { kind: 'hardware' }
   | { kind: 'bundles' }
   | { kind: 'desktop' }

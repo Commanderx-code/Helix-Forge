@@ -500,6 +500,52 @@ it again. `helix-toolbox migrate export [file]`, `migrate show <file>` and
 `migrate apply <file>` (`--dry-run`, `--yes`, confirmed by typing MIGRATE)
 do the same.
 
+## Restic
+
+**Restic** works with a restic repository of your own files. The repository
+comes from the `[restic]` table of `settings.toml`:
+
+```toml
+[restic]
+repository = "/run/media/me/Backup/restic"   # or sftp:, rest:, s3: and the others
+password_file = "~/.config/restic/password"   # or password_command = "…"
+paths = ["~/Documents", "~/Pictures"]         # what a backup takes; the home folder when left out
+excludes = ["~/.cache"]                       # restic --exclude patterns; ~/.cache and the trash when left out
+```
+
+Without it, restic's own `RESTIC_REPOSITORY` and `RESTIC_PASSWORD_FILE`,
+`RESTIC_PASSWORD_COMMAND` or `RESTIC_PASSWORD` are used, or a KWallet entry
+that `RESTIC_WALLET`, `RESTIC_WALLET_ENTRY` and `RESTIC_WALLET_FOLDER` name;
+then the settings Command Center left, read only. Helix Toolbox never
+keeps a password, and refuses a repository address with one in it.
+
+The screen lists the snapshots (the latest 30 of each machine and folder).
+`Enter` browses one, a folder at a time. `s` looks for a name or path, with
+`*` wildcards, in every snapshot: each version of each file it finds,
+whether it changed from the version before (its size or time), and how
+many newer snapshots of the same folder no longer have it. `R` on a
+snapshot, a file or a version restores it into a new folder of your home
+folder, which must not be there yet: restic restores with `--overwrite
+never` and reads what it wrote back (`--verify`, restic 0.17 or later).
+`b` backs up the folders named (`--exclude-caches` too), `c` checks the
+repository's structure. Each is a plan you review.
+
+Recovery tests prove a restore works before you need one. `n` records a
+file's SHA-256 (a file of your home folder, up to 100 MB) in
+`recovery-baselines.json` beside the history, the last 50. Back it up, then
+`v` on it restores it from a snapshot (the latest, or one you name) into a
+temporary folder, compares, says PASS or FAIL and removes the folder.
+
+`w` turns a daily backup on or off: `helix-toolbox-restic.timer` and its
+service in your systemd user folder, which run `helix-toolbox restic backup
+--yes`. It needs the password from a file or a command, since the timer
+has none of your environment, and it never replaces or removes a unit it
+did not write. `helix-toolbox restic` (`files <snapshot> [folder]`,
+`history <pattern>`, `backup`, `check`, `restore <snapshot> <folder>
+[--include <path>]`, `baseline [file]`, `test <baseline> [snapshot]` and
+`timer on|off [--weekly]`; plans with `--dry-run` and `--yes`, confirmed by
+typing BACKUP, CHECK, RESTORE or TEST) does the same.
+
 ## Reliability and trust
 
 **Reliability** lists every entry with how far it has been tested, the
@@ -620,6 +666,7 @@ helix-toolbox performance                # this boot, the machine now, and the b
 helix-toolbox recovery                   # snapshots, kernels, backups; --check-snapshots looks inside, as root
 helix-toolbox migrate export [file]      # what this machine has, to take to another
 helix-toolbox migrate show <file>        # what a migration means here; migrate apply installs it
+helix-toolbox restic                     # the repository and its snapshots; history, restore, test
 helix-toolbox reliability --critical     # how far the boot, login and driver entries are tested
 helix-toolbox trust sddm                 # where an entry comes from and what checks it
 helix-toolbox doctor                     # health checks, read-only
