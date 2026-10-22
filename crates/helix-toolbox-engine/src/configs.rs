@@ -331,11 +331,11 @@ fn check(path: &Path, facts: &Facts) -> Result<PathBuf, String> {
             "{shown} is managed by Home Manager (it is in the Nix store); name its source in your dotfiles under [configs] in settings.toml"
         ));
     }
-    let home = facts
-        .home
-        .canonicalize()
-        .unwrap_or_else(|_| facts.home.to_path_buf());
-    if !real.starts_with(&home) {
+    // The configuration folder is the user's own too, also where it is
+    // set outside the home folder.
+    let own = [facts.home, facts.config_home]
+        .map(|folder| folder.canonicalize().unwrap_or_else(|_| folder.to_path_buf()));
+    if !own.iter().any(|folder| real.starts_with(folder)) {
         return Err(format!("{shown} is outside your home folder"));
     }
     if real.exists() {
