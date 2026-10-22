@@ -4,9 +4,9 @@
 # palette, the theme, the keyboard, every screen, a run with its change
 # preview, the removal of a package entry, a saved profile exported,
 # deleted and imported again, the offline bundles screen, a migration
-# exported and one read, a bug report and the update notifications turned
-# on and off, against the fixture catalog, and check what the drive script
-# reports.
+# exported and one read, a scratch repository's diff, stage and task
+# reviewed, a bug report and the update notifications turned on and off,
+# against the fixture catalog, and check what the drive script reports.
 # usage: scripts/gui-smoke.sh BINARY
 # BINARY is a debug build with the frontend in it (cargo build --features
 # tauri/custom-protocol in apps/helix-toolbox-gui/src-tauri, after npm run
@@ -63,6 +63,19 @@ chmod +x "$work/bin/systemctl" "$work/bin/systemd-analyze" "$work/bin/xdg-open" 
 export PATH="$work/bin:$PATH"
 mkdir -p "$work/home" "$work/config" "$work/state" "$work/data" "$work/cache"
 export HOME="$work/home"
+# A repository for the Repositories screen, under one of the folders it
+# looks in by default: a commit and a new file.
+repo="$work/home/projects/sample"
+mkdir -p "$repo"
+git_here() {
+    GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=Smoke GIT_AUTHOR_EMAIL=smoke@example.com \
+        GIT_COMMITTER_NAME=Smoke GIT_COMMITTER_EMAIL=smoke@example.com git -C "$repo" "$@"
+}
+git_here init -q -b main
+printf 'one\n' > "$repo/one.txt"
+git_here add one.txt
+git_here commit -q -m First
+printf 'new\n' > "$repo/new.txt"
 export XDG_CONFIG_HOME="$work/config" XDG_STATE_HOME="$work/state" \
     XDG_DATA_HOME="$work/data" XDG_CACHE_HOME="$work/cache"
 # A migration made on Fedora, for the Migration screen to read: a fixture
@@ -147,6 +160,15 @@ fi
 # The hardware report's issue went to the browser, filled in.
 if ! grep -q '^https://github.com/Commanderx-code/Helix-toolbox/issues/new?template=hardware_report.yml&.*records=' "$work/xdg-open.log" 2>/dev/null; then
     echo "the hardware report's issue was not opened" >&2
+    exit 1
+fi
+# The repository's stage was reviewed and canceled, and its task kept.
+if [ -n "$(git_here diff --cached --name-only)" ]; then
+    echo "something was staged in the scratch repository" >&2
+    exit 1
+fi
+if ! grep -q 'echo smoke' "$work/config/helix-toolbox/workspaces.toml" 2>/dev/null; then
+    echo "the task was not kept in workspaces.toml" >&2
     exit 1
 fi
 echo "the window's smoke test passed"

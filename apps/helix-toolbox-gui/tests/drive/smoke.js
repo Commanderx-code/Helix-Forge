@@ -195,7 +195,7 @@
     await until('the focus back on Marker', () => document.activeElement === marker);
   });
 
-  const screens = ['Updates','Backups', 'Drift', 'Reliability', 'Hardware', 'Services', 'Storage', 'Performance', 'Recovery', 'Migration', 'Desktop', 'History', 'Favorites', 'Dashboard'];
+  const screens = ['Updates','Backups', 'Drift', 'Reliability', 'Hardware', 'Services', 'Storage', 'Performance', 'Recovery', 'Migration', 'Repositories', 'Desktop', 'History', 'Favorites', 'Dashboard'];
   for (const name of screens) {
     await step(`the ${name} screen opens`, async () => {
       await click(name, document.querySelector('nav'));
@@ -411,6 +411,37 @@
     await click(button('Cancel', review) ? 'Cancel' : 'OK', review);
     await until('the review to close', () => !document.querySelector('#confirm-title'));
     return `exported; ${install.querySelectorAll('li').length} to install reviewed; nothing ran`;
+  });
+
+  await step('a repository is opened, its diff shown, a stage and a task reviewed, and nothing runs', async () => {
+    await click('Repositories', document.querySelector('nav'));
+    await until('Repositories', () => screenTitle().startsWith('Repositories'));
+    // scripts/gui-smoke.sh made it under the scratch home's projects folder.
+    const open = await until('the scratch repository', () => withText('.open .name', 'sample')?.closest('button'), 60000);
+    open.click();
+    const changes = await until('its changes', () => document.querySelector('[aria-label="Changes"]'), 30000);
+    if (!changes.textContent.includes('new.txt')) throw new Error(`changes: ${changes.textContent.trim()}`);
+    await click('Diff', changes);
+    await until('the diff', () => document.querySelector('pre[aria-label="Diff"]')?.textContent.includes('+new'));
+    await accessible('a repository open');
+    await click('Stage…', changes);
+    let review = await until('the review', () => document.querySelector('#confirm-title')?.closest('[role="dialog"]'), 30000);
+    if (!review.textContent.includes('Stage 1 file in sample')) throw new Error(review.textContent);
+    await click(button('Cancel', review) ? 'Cancel' : 'OK', review);
+    await until('the review to close', () => !document.querySelector('#confirm-title'));
+    // A command of the user's, kept for the repository, is reviewed before it runs.
+    const command = await until('the task field', () => withText('.field', 'A command of yours')?.querySelector('input'));
+    await type(command, 'sh -c "echo smoke"');
+    await click('Keep');
+    const tasks = await until('the task', () => withText('[aria-label="Tasks"] li', 'echo smoke'), 30000);
+    await click('Run…', tasks);
+    review = await until('its review', () => document.querySelector('#confirm-title')?.closest('[role="dialog"]'), 30000);
+    if (!review.textContent.includes('echo smoke')) throw new Error(review.textContent);
+    await accessible('a task under review');
+    await click(button('Cancel', review) ? 'Cancel' : 'OK', review);
+    await until('the review to close', () => !document.querySelector('#confirm-title'));
+    await click('All repositories');
+    return 'diff shown; a stage and a task reviewed; nothing ran';
   });
 
   await step('an entry is checked now, without changing anything', async () => {

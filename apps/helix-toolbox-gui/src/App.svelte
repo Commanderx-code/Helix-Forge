@@ -20,6 +20,7 @@
   import Performance from './screens/Performance.svelte';
   import Recovery from './screens/Recovery.svelte';
   import Migration from './screens/Migration.svelte';
+  import Repositories from './screens/Repositories.svelte';
   import Hardware from './screens/Hardware.svelte';
   import Bundles from './screens/Bundles.svelte';
   import Desktop from './screens/Desktop.svelte';
@@ -77,6 +78,8 @@
         <Recovery />
       {:else if toolbox.screen.kind === 'migration'}
         <Migration />
+      {:else if toolbox.screen.kind === 'repositories'}
+        <Repositories />
       {:else if toolbox.screen.kind === 'hardware'}
         <Hardware />
       {:else if toolbox.screen.kind === 'bundles'}
