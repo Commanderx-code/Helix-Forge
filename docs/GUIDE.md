@@ -253,6 +253,15 @@ to push. Open one to read its diffs, stage files with `Space`, commit with
 such as `npm run dev` or `cargo test`, are found in its files, and `n` adds
 a command of your own; `Enter` runs one in the project's folder.
 
+## Your terminal's look
+
+**Configs** changes Ghostty's font, theme and padding, or which modules
+Fastfetch shows, without hunting for the right file: where Home Manager
+manages it, the file in your dotfiles is the one changed, and you are told
+to run Home Manager. Each change is checked and shown side by side before
+it is saved, and the file before it is kept, so `Enter` on a backup puts
+it back.
+
 ## A machine without internet
 
 On a machine of the same distribution that is online, `helix-toolbox bundle
