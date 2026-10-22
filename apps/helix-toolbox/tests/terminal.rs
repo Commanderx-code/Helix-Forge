@@ -523,6 +523,46 @@ fn the_menu_starts_when_standard_input_is_a_pipe_as_with_curl_into_sh() {
 }
 
 #[test]
+fn the_menu_opens_on_the_screen_asked_for() {
+    let home = tempfile::tempdir().unwrap();
+    let catalog = fixtures();
+    let mut tui = Terminal::start(
+        &[
+            "--catalog-dir",
+            catalog.to_str().unwrap(),
+            "tui",
+            "--bypass-root",
+            "--screen",
+            "plan",
+        ],
+        home.path(),
+        40,
+        120,
+    );
+    tui.wait_for(&["SYSTEM READY", "Nothing is queued"]);
+    tui.keys("q");
+    assert_eq!(tui.wait_for_exit(), 0);
+    // A name it does not know is said before the terminal is taken over.
+    let mut tui = Terminal::start(
+        &[
+            "--catalog-dir",
+            catalog.to_str().unwrap(),
+            "tui",
+            "--bypass-root",
+            "--screen",
+            "nowhere",
+        ],
+        home.path(),
+        40,
+        120,
+    );
+    assert_ne!(tui.wait_for_exit(), 0);
+    let said = tui.contents();
+    assert!(said.contains("there is no screen named nowhere"), "{said}");
+    assert!(said.contains("updates"), "{said}");
+}
+
+#[test]
 fn the_banner_is_drawn_where_the_terminal_shows_pictures() {
     let home = tempfile::tempdir().unwrap();
     let mut command = CommandBuilder::new(PROGRAM);

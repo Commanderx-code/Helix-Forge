@@ -41,7 +41,7 @@ use ratatui::{
     style::{Color, Style},
     symbols::border,
     text::{Line, Span, Text},
-    widgets::{Block, List, ListState, Padding, Paragraph, Wrap},
+    widgets::{Block, List, ListItem, ListState, Padding, Paragraph, Wrap},
 };
 use ratatui_image::{Image, protocol::Protocol};
 use std::{
@@ -82,18 +82,18 @@ Risk in a plan: D, K and SI are high; installs, services and anything privileged
 const HELP: &str = "Everywhere
   Tab / Shift-Tab   next / previous screen       t   next theme (remembered)
   /                 search every area            ?   this help
-  Ctrl-K            commands, by name            q / Ctrl-C  quit
+  Ctrl-K            commands, by name            q / Ctrl-C  quit        Ctrl-R  check installed again
   j / k             move in the sidebar          Enter / l   open the screen or quick action
 
 Areas (Applications and the other catalog screens)
   Enter / l         open a group or run an entry o / x / Del  Profiles: import, export, delete
   h                 parent group, or the sidebar Space       add to or remove from the install plan
-  d                 description                  p           preview the script or command
+  d / e             details / profile into plan  p           preview the script or command
   r / c             remove a package / check it  v           where it comes from (trust)
   u                 update the entry             U           update every entry with an update
   g                 flags guide     *   pin a favorite     i   show all, installed or updates
 
-Install Plan   Enter run it   x / Del remove one   c clear   s save as a profile   e what it changes
+Install Plan   Enter run it   x / Del remove one   K / J move   c clear   s save as profile   e changes
 
 History, Backups, Doctor, Hardware, Desktop, Updates, Drift, Reliability, Settings
   Enter             log / restore / details / change   r   reload or check again; f repair; u / U update
@@ -114,7 +114,7 @@ Running window
 ";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Screen {
+pub(super) enum Screen {
     Dashboard,
     Area(usize),
     Plan,
@@ -489,6 +489,8 @@ enum Act {
     ImportProfile,
     Report,
     UpdateEntries,
+    /// Check again how package entries stand.
+    CheckStatuses,
     Theme,
     Icons,
     Help,
@@ -557,7 +559,13 @@ impl DriftTarget {
 #[derive(Clone)]
 enum Row {
     Up,
-    Group { index: usize, name: String },
+    Group {
+        index: usize,
+        name: String,
+        description: String,
+        /// How many items it holds, as the window counts them.
+        count: usize,
+    },
     Entry(Box<Entry>),
 }
 
@@ -617,20 +625,87 @@ struct AreaState {
     selected: usize,
 }
 
-const QUICK_ICONS: [Icon; 5] = [
-    Icon::Applications,
-    Icon::Plan,
-    Icon::Doctor,
-    Icon::History,
-    Icon::Favorites,
+/// The screens `--screen` opens on by name; areas go by their id.
+const SCREEN_NAMES: [(&str, Screen); 22] = [
+    ("dashboard", Screen::Dashboard),
+    ("plan", Screen::Plan),
+    ("favorites", Screen::Favorites),
+    ("history", Screen::History),
+    ("backups", Screen::Backups),
+    ("doctor", Screen::Doctor),
+    ("updates", Screen::Updates),
+    ("drift", Screen::Drift),
+    ("reliability", Screen::Reliability),
+    ("hardware", Screen::Hardware),
+    ("desktop", Screen::Desktop),
+    ("bundles", Screen::Bundles),
+    ("services", Screen::Services),
+    ("storage", Screen::Storage),
+    ("performance", Screen::Performance),
+    ("recovery", Screen::Recovery),
+    ("migration", Screen::Migration),
+    ("restic", Screen::Restic),
+    ("repositories", Screen::Repositories),
+    ("configs", Screen::Configs),
+    ("home-manager", Screen::HomeManager),
+    ("settings", Screen::Settings),
 ];
 
-const QUICK_ACTIONS: [(&str, &str); 5] = [
-    ("Browse Applications", "Search and install tools"),
-    ("Review the Install Plan", "See what is queued and run it"),
-    ("Run System Doctor", "Health checks and reports"),
-    ("View History", "Past runs and their logs"),
-    ("Favorites", "Pinned and recently run entries"),
+/// What a quick action on the dashboard opens.
+#[derive(Clone, Copy)]
+enum Quick {
+    Applications,
+    Plan,
+    Wizard,
+    Palette,
+    Doctor,
+    History,
+    Favorites,
+}
+
+const QUICK_ACTIONS: [(Icon, &str, &str, Quick); 7] = [
+    (
+        Icon::Applications,
+        "Browse Applications",
+        "Search and install tools",
+        Quick::Applications,
+    ),
+    (
+        Icon::Plan,
+        "Review the Install Plan",
+        "See what is queued and run it",
+        Quick::Plan,
+    ),
+    (
+        Icon::Settings,
+        "Set up this machine",
+        "Choose a workstation to review",
+        Quick::Wizard,
+    ),
+    (
+        Icon::Search,
+        "Find anything",
+        "Any screen, action or entry",
+        Quick::Palette,
+    ),
+    (
+        Icon::Doctor,
+        "Run System Doctor",
+        "Health checks and reports",
+        Quick::Doctor,
+    ),
+    (
+        Icon::History,
+        "View History",
+        "Past runs and their logs",
+        Quick::History,
+    ),
+    (
+        Icon::Favorites,
+        "Favorites",
+        "Pinned and recently run entries",
+        Quick::Favorites,
+    ),
 ];
 
 pub struct App {
@@ -1171,6 +1246,8 @@ impl App {
                     Item::Group(group) => Row::Group {
                         index,
                         name: group.name.clone(),
+                        description: group.description.clone(),
+                        count: group.items.len(),
                     },
                     Item::Entry(entry) => Row::Entry(Box::new(entry.clone())),
                 }));
@@ -1242,6 +1319,118 @@ impl App {
         match self.selected_row() {
             Some(Row::Entry(entry)) => Some(entry.as_ref()),
             _ => None,
+        }
+    }
+
+    /// The screen `--screen` names: a fixed screen's name, or an area's id.
+    pub(super) fn screen_named(&self, name: &str) -> Option<Screen> {
+        let name = name.trim().to_lowercase();
+        SCREEN_NAMES
+            .iter()
+            .find(|(known, _)| *known == name)
+            .map(|(_, screen)| *screen)
+            .or_else(|| {
+                let index = self.catalog.tabs.iter().position(|tab| tab.id == name)?;
+                // Only an area the menu shows.
+                self.menu
+                    .iter()
+                    .any(|item| item.screen == Screen::Area(index))
+                    .then_some(Screen::Area(index))
+            })
+    }
+
+    /// The names `--screen` takes, for its error.
+    pub(super) fn screen_names(&self) -> String {
+        let mut names: Vec<&str> = SCREEN_NAMES.iter().map(|(name, _)| *name).collect();
+        names.extend(self.menu.iter().filter_map(|item| match item.screen {
+            Screen::Area(index) => Some(self.catalog.tabs[index].id.as_str()),
+            _ => None,
+        }));
+        names.join(", ")
+    }
+
+    /// Open on the screen `--screen` named, with the focus on it.
+    pub(super) fn open_on(&mut self, screen: Screen) {
+        self.open_screen(screen);
+        if screen != Screen::Dashboard {
+            self.focus = Focus::Main;
+        }
+    }
+
+    /// Where an entry is listed: its area, and the group that holds it.
+    fn place(&self, id: &str) -> Option<(String, Option<String>)> {
+        fn walk(items: &[Item], id: &str, group: Option<&str>) -> Option<Option<String>> {
+            items.iter().find_map(|item| match item {
+                Item::Entry(entry) if entry.id == id => Some(group.map(str::to_string)),
+                Item::Group(inner) => walk(&inner.items, id, Some(&inner.name)),
+                Item::Entry(_) => None,
+            })
+        }
+        self.catalog
+            .tabs
+            .iter()
+            .find_map(|tab| walk(&tab.items, id, None).map(|group| (tab.name.clone(), group)))
+    }
+
+    /// "Area › group", as the window writes where an entry is.
+    fn place_label(&self, id: &str) -> Option<String> {
+        self.place(id).map(|(area, group)| match group {
+            Some(group) => format!("{area} › {group}"),
+            None => area,
+        })
+    }
+
+    /// Package entries found installed (or kept by Nix), and those with an
+    /// update waiting, from the last check.
+    fn installed_count(&self) -> usize {
+        self.statuses
+            .values()
+            .filter(|status| {
+                matches!(
+                    status,
+                    Status::Installed { .. } | Status::Elsewhere { .. } | Status::Managed { .. }
+                )
+            })
+            .count()
+    }
+
+    fn update_count(&self) -> usize {
+        self.statuses
+            .values()
+            .filter(|status| matches!(status, Status::Update { .. }))
+            .count()
+    }
+
+    /// What the footer says of the check of package entries, once one has
+    /// started or answered.
+    fn check_line(&self) -> Option<String> {
+        if self.checking.is_some() {
+            Some("Checking what is installed…".to_string())
+        } else if self.check_statuses || !self.statuses.is_empty() {
+            Some(format!(
+                "{} package entries checked · Ctrl-R check again",
+                self.statuses.len()
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Check again how package entries stand, unless a check is running.
+    fn check_again(&mut self) {
+        if self.checking.is_none() {
+            self.planned = None;
+            self.refresh_statuses();
+        }
+    }
+
+    /// The count the sidebar shows beside a screen, when there is one.
+    fn menu_count(&self, screen: Screen) -> usize {
+        match screen {
+            Screen::Favorites => self.favorites.len(),
+            Screen::Plan => self.queue.len(),
+            Screen::Updates => self.update_count(),
+            _ => 0,
         }
     }
 
@@ -1736,9 +1925,10 @@ impl App {
             ]);
             frame.render_widget(Paragraph::new(brand), text);
             let middle = Rect::new(area.x, top, area.width.saturating_sub(2), 1).intersection(area);
+            let room = (text.width as usize)
+                .saturating_sub(helix.chars().count() + 3 + toolbox.chars().count());
             frame.render_widget(
-                Paragraph::new(Line::styled(status, Style::default().fg(color).bold()))
-                    .alignment(Alignment::Right),
+                Paragraph::new(self.header_status(status, color, room)).alignment(Alignment::Right),
                 middle,
             );
             self.rule(frame, area.x, area.bottom().saturating_sub(1), area.width);
@@ -1775,12 +1965,27 @@ impl App {
             Line::styled(TAGLINE, Style::default().fg(self.theme.faint())),
         ]);
         frame.render_widget(Paragraph::new(brand), text);
+        let room = (text.width as usize).saturating_sub("HELIX TOOLBOX".len());
         frame.render_widget(
-            Paragraph::new(Line::styled(status, Style::default().fg(color).bold()))
-                .alignment(Alignment::Right),
+            Paragraph::new(self.header_status(status, color, room)).alignment(Alignment::Right),
             text,
         );
         self.rule(frame, area.x, area.bottom().saturating_sub(1), area.width);
+    }
+
+    /// READY or RUNNING at the right of the header, with the version before
+    /// it when `room` columns beside the name hold both.
+    fn header_status(&self, status: &'static str, color: Color, room: usize) -> Line<'static> {
+        const VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"), "   ");
+        let mut spans = Vec::new();
+        if VERSION.chars().count() + status.chars().count() + 2 <= room {
+            spans.push(Span::styled(
+                VERSION,
+                Style::default().fg(self.theme.faint()),
+            ));
+        }
+        spans.push(Span::styled(status, Style::default().fg(color).bold()));
+        Line::from(spans)
     }
 
     /// A rounded card whose fill stays inside its border, as in the design;
@@ -1847,7 +2052,7 @@ impl App {
         for &index in items {
             let item = &self.menu[index];
             let current = item.screen == self.screen;
-            let label = self.menu_label(item, current);
+            let label = self.menu_label(item, current, inner.width.saturating_sub(4));
             let border = match (current, focused) {
                 (true, true) => self.theme.focused(),
                 (true, false) => self.theme.selected_line(),
@@ -1874,15 +2079,18 @@ impl App {
         }
     }
 
-    /// A menu item's icon and label.
-    fn menu_label(&self, item: &MenuItem, current: bool) -> Line<'static> {
+    /// A menu item's icon and label, with its count at the right of
+    /// `width` when it has one, as the window's sidebar shows.
+    fn menu_label(&self, item: &MenuItem, current: bool, width: u16) -> Line<'static> {
         let icon = self.icon_gap(self.menu_icon(item.screen));
         let text_style = if current {
             Style::default().fg(self.theme.on_selected()).bold()
         } else {
             Style::default().fg(self.theme.entry())
         };
-        Line::from(vec![
+        let count = self.menu_count(item.screen);
+        let used = icon.chars().count() + item.label.chars().count();
+        let mut spans = vec![
             Span::styled(
                 icon,
                 Style::default().fg(if current {
@@ -1892,7 +2100,22 @@ impl App {
                 }),
             ),
             Span::styled(item.label.clone(), text_style),
-        ])
+        ];
+        if count > 0 {
+            let number = count.to_string();
+            let gap = (width as usize).saturating_sub(used + number.chars().count());
+            if gap >= 1 {
+                // The Install Plan's count stands out, as in the window.
+                let color = if item.screen == Screen::Plan {
+                    self.theme.focused()
+                } else {
+                    self.theme.muted()
+                };
+                spans.push(Span::raw(" ".repeat(gap)));
+                spans.push(Span::styled(number, Style::default().fg(color).bold()));
+            }
+        }
+        Line::from(spans)
     }
 
     /// One menu item as a line, marked when it is the current screen.
@@ -1983,7 +2206,7 @@ impl App {
                     self.menu_row(
                         frame,
                         area,
-                        self.menu_label(item, current),
+                        self.menu_label(item, current, area.width.saturating_sub(3)),
                         current,
                         focused,
                     );
@@ -2045,13 +2268,41 @@ impl App {
             "Welcome to your Linux command center.",
         );
         let rows = self.overview.rows.len() as u16;
-        let actions = QUICK_ACTIONS.len() as u16;
+        // The quick actions in two columns where two of them fit side by
+        // side: cards need more room than lines.
+        let content_width = content.width;
+        let columns = move |card: u16| -> u16 {
+            let wide = if card == 1 { 56 } else { 72 };
+            if content_width >= wide { 2 } else { 1 }
+        };
         let overview_height = |spaced: bool| if spaced { rows * 2 + 1 } else { rows + 2 };
-        // Roomy rows and two-line cards when they fit, tighter otherwise.
-        let (spaced, card) = [(true, 4), (false, 4), (false, 3), (false, 1)]
-            .into_iter()
-            .find(|&(spaced, card)| overview_height(spaced) + 3 + actions * card <= content.height)
-            .unwrap_or((false, 1));
+        let actions = |card: u16| (QUICK_ACTIONS.len() as u16).div_ceil(columns(card)) * card;
+        // Roomy rows and two-line cards with the counts as tiles when they
+        // fit, the counts as a line before smaller cards, tighter otherwise.
+        // `tiles` is the counts' height: tiles with a blank line after them,
+        // or one line.
+        let (tiles, spaced, card) = [
+            (4, true, 4),
+            (4, false, 4),
+            (1, false, 4),
+            (4, false, 3),
+            (1, false, 3),
+            (0, false, 3),
+            (1, false, 1),
+            (0, false, 1),
+        ]
+        .into_iter()
+        .find(|&(tiles, spaced, card)| {
+            tiles + overview_height(spaced) + 3 + actions(card) <= content.height
+        })
+        .unwrap_or((0, false, 1));
+        self.draw_counts(frame, Rect::new(content.x, content.y, content.width, tiles));
+        let content = Rect::new(
+            content.x,
+            content.y + tiles,
+            content.width,
+            content.height.saturating_sub(tiles),
+        );
         let width = content.width.saturating_sub(4) as usize;
         let mut lines: Vec<Line> = Vec::new();
         for (index, (label, value)) in self.overview.rows.iter().enumerate() {
@@ -2085,7 +2336,7 @@ impl App {
         self.fill(frame, overview);
         frame.render_widget(Paragraph::new(Text::from(lines)).block(block), overview);
         // A blank line before the heading, unless every action would not fit.
-        let gap = u16::from(overview_height(spaced) + 3 + actions * card <= content.height);
+        let gap = u16::from(overview_height(spaced) + 3 + actions(card) <= content.height);
         let heading = overview.bottom() + gap;
         if heading >= content.bottom() {
             return;
@@ -2104,39 +2355,111 @@ impl App {
             content.bottom().saturating_sub(heading + 1),
         );
         let focused = self.focus == Focus::Main;
+        let selected = self.main_state.selected().unwrap_or(0);
+        let columns = columns(card);
+        // Side by side, in reading order, with a column between them.
+        let column_width = (list.width + 1) / columns - 1;
         if card == 1 {
-            let items: Vec<Line> = QUICK_ACTIONS
-                .iter()
-                .map(|(title, detail)| {
-                    Line::from(vec![
-                        Span::styled(*title, Style::default().fg(self.theme.entry()).bold()),
-                        Span::styled(
-                            format!("   {detail}"),
-                            Style::default().fg(self.theme.muted()),
-                        ),
-                    ])
-                })
-                .collect();
-            let widget = List::new(items)
-                .highlight_style(self.highlight(focused))
-                .highlight_symbol(self.marker(focused));
-            frame.render_stateful_widget(widget, list, &mut self.main_state);
+            let marker = self.marker(focused);
+            let blank = " ".repeat(marker.chars().count());
+            for (index, (_, title, detail, _)) in QUICK_ACTIONS.iter().enumerate() {
+                let row = index as u16 / columns;
+                let column = index as u16 % columns;
+                if row >= list.height {
+                    break;
+                }
+                let rect = Rect::new(
+                    list.x + column * (column_width + 1),
+                    list.y + row,
+                    column_width,
+                    1,
+                );
+                let chosen = index == selected;
+                let line = Line::from(vec![
+                    Span::raw(if chosen { marker } else { blank.as_str() }.to_string()),
+                    Span::styled(*title, Style::default().fg(self.theme.entry()).bold()),
+                    Span::styled(
+                        format!("   {detail}"),
+                        Style::default().fg(self.theme.muted()),
+                    ),
+                ]);
+                let style = if chosen {
+                    self.highlight(focused)
+                } else {
+                    Style::default()
+                };
+                frame.render_widget(Paragraph::new(line).style(style), rect);
+            }
             return;
         }
-        let selected = self.main_state.selected().unwrap_or(0);
-        for (index, (title, detail)) in QUICK_ACTIONS.iter().enumerate() {
-            let rect = Rect::new(list.x, list.y + index as u16 * card, list.width, card);
+        for (index, (icon, title, detail, _)) in QUICK_ACTIONS.iter().enumerate() {
+            let row = index as u16 / columns;
+            let column = index as u16 % columns;
+            let rect = Rect::new(
+                list.x + column * (column_width + 1),
+                list.y + row * card,
+                column_width,
+                card,
+            );
             if rect.bottom() > list.bottom() {
                 break;
             }
             self.action_card(
                 frame,
                 rect,
-                QUICK_ICONS[index],
+                *icon,
                 title,
                 detail,
                 index == selected,
                 focused,
+            );
+        }
+    }
+
+    /// The dashboard's counts, as the window's tiles: installed, updates
+    /// waiting, queued and pinned. Four tiles in three rows, else one line.
+    fn draw_counts(&self, frame: &mut Frame, area: Rect) {
+        if area.height == 0 {
+            return;
+        }
+        let counts = [
+            (self.installed_count(), "installed", self.theme.success()),
+            (self.update_count(), "updates", self.theme.warning()),
+            (self.queue.len(), "queued", self.theme.focused()),
+            (self.favorites.len(), "pinned", self.theme.title()),
+        ];
+        if area.height < 4 {
+            let mut spans = Vec::new();
+            for (index, (count, label, color)) in counts.iter().enumerate() {
+                if index > 0 {
+                    spans.push(Span::styled(" · ", Style::default().fg(self.theme.faint())));
+                }
+                spans.push(Span::styled(
+                    count.to_string(),
+                    Style::default().fg(*color).bold(),
+                ));
+                spans.push(Span::styled(
+                    format!(" {label}"),
+                    Style::default().fg(self.theme.muted()),
+                ));
+            }
+            frame.render_widget(
+                Paragraph::new(Line::from(spans)),
+                Rect::new(area.x, area.y, area.width, 1),
+            );
+            return;
+        }
+        let tile = (area.width + 1) / 4 - 1;
+        for (index, (count, label, color)) in counts.iter().enumerate() {
+            let rect = Rect::new(area.x + index as u16 * (tile + 1), area.y, tile, 3);
+            let inside = self.framed(frame, rect, self.theme.line(), self.theme.card());
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(count.to_string(), Style::default().fg(*color).bold()),
+                    Span::styled(format!(" {label}"), Style::default().fg(self.theme.muted())),
+                ]))
+                .alignment(Alignment::Center),
+                inside,
             );
         }
     }
@@ -2313,14 +2636,39 @@ impl App {
         let content_width =
             (block.inner(area).width as usize).saturating_sub(marker.chars().count());
         let group = self.glyph(Icon::Group);
+        let searching = self.searching();
         let lines: Vec<Line> = self
             .rows
             .iter()
             .map(|row| match row {
                 Row::Up => Line::from(format!("{group}  .."))
                     .style(Style::default().fg(self.theme.group())),
-                Row::Group { name, .. } => Line::from(format!("{group}  {name}"))
-                    .style(Style::default().fg(self.theme.group())),
+                Row::Group {
+                    name,
+                    description,
+                    count,
+                    ..
+                } => {
+                    // Its name, what it holds, and how many, as the window shows a group.
+                    let left = format!("{group}  {name}");
+                    let number = format!("{count} ");
+                    let room = content_width
+                        .saturating_sub(left.chars().count() + number.chars().count() + 2);
+                    let about = if description.is_empty() || room < 8 {
+                        String::new()
+                    } else {
+                        format!("  {}", clipped(description, room))
+                    };
+                    let gap = " ".repeat(content_width.saturating_sub(
+                        left.chars().count() + about.chars().count() + number.chars().count(),
+                    ));
+                    Line::from(vec![
+                        Span::styled(left, Style::default().fg(self.theme.group())),
+                        Span::styled(about, Style::default().fg(self.theme.faint())),
+                        Span::raw(gap),
+                        Span::styled(number, Style::default().fg(self.theme.muted())),
+                    ])
+                }
                 Row::Entry(entry) => {
                     let queued = self.is_queued(entry);
                     let (style, icon_color) = if queued {
@@ -2331,10 +2679,13 @@ impl App {
                     } else {
                         (Style::default().fg(self.theme.entry()), self.theme.muted())
                     };
+                    // An entry that cannot be queued is marked as running on its own.
                     let icon = if queued {
                         self.glyph(Icon::Queued)
-                    } else {
+                    } else if entry.multi_select {
                         self.glyph(Icon::Entry)
+                    } else {
+                        self.glyph(Icon::Alone)
                     };
                     // Without icons, a queued entry is marked after its name; a pinned one
                     // always is.
@@ -2375,11 +2726,32 @@ impl App {
                     };
                     let right =
                         word.chars().count() + detail.chars().count() + flags.chars().count();
-                    let gap =
-                        " ".repeat(content_width.saturating_sub(left.chars().count() + right));
+                    // Between them, where it fits: where a search result is
+                    // listed, then the description, as the window's rows show.
+                    let room = content_width.saturating_sub(left.chars().count() + right + 3);
+                    let place = if searching {
+                        self.place_label(&entry.id)
+                    } else {
+                        None
+                    };
+                    let about = match (place, entry.description.is_empty()) {
+                        (Some(place), true) => place,
+                        (Some(place), false) => format!("{place} · {}", entry.description),
+                        (None, _) => entry.description.clone(),
+                    };
+                    let about = if about.is_empty() || room < 8 {
+                        String::new()
+                    } else {
+                        format!("  {}", clipped(&about, room))
+                    };
+                    let gap = " ".repeat(
+                        content_width
+                            .saturating_sub(left.chars().count() + about.chars().count() + right),
+                    );
                     Line::from(vec![
                         Span::styled(icon.to_string(), Style::default().fg(icon_color)),
                         Span::styled(format!("  {}{suffix}", entry.name), style),
+                        Span::styled(about, Style::default().fg(self.theme.faint())),
                         Span::raw(gap),
                         Span::styled(word, Style::default().fg(color)),
                         Span::styled(detail, Style::default().fg(self.theme.faint())),
@@ -2491,34 +2863,65 @@ impl App {
         );
         let focused = self.focus == Focus::Main;
         let steps = planned.map(|planned| planned.steps).unwrap_or_default();
-        let items: Vec<Line> = self
+        let block = self.card(&format!("Queued entries · {}", self.queue.len()));
+        let marker = self.marker(focused);
+        let width = (block.inner(parts[2]).width as usize).saturating_sub(marker.chars().count());
+        // Each entry in two lines, as the window's rows: its number, name,
+        // status and flags, then where it is listed, its kind and its step.
+        let items: Vec<ListItem> = self
             .queue
             .iter()
-            .map(|entry| {
+            .enumerate()
+            .map(|(index, entry)| {
                 let command = steps
                     .iter()
                     .find(|step| step.id() == entry.id)
                     .map(|step| step.display())
                     .unwrap_or_else(|| "nothing to do".to_string());
-                Line::from(vec![
-                    Span::styled(
-                        self.icon_gap(Icon::Queued),
-                        Style::default().fg(self.theme.success()),
-                    ),
-                    Span::styled(
-                        entry.name.clone(),
-                        Style::default().fg(self.theme.entry()).bold(),
-                    ),
-                    Span::styled(
-                        format!("   {command}"),
-                        Style::default().fg(self.theme.muted()),
-                    ),
-                ])
+                let icon = self.icon_gap(Icon::Queued);
+                let number = format!("{}. ", index + 1);
+                let (word, color) = match self.statuses.get(&entry.id) {
+                    Some(status) => (status.label().to_string(), self.status_color(status)),
+                    None => (String::new(), self.theme.muted()),
+                };
+                let flags = format!("  {} ", entry.flags.trim());
+                let left = icon.chars().count() + number.len() + entry.name.chars().count();
+                let gap = " ".repeat(
+                    width.saturating_sub(left + word.chars().count() + flags.chars().count()),
+                );
+                let indent = " ".repeat(icon.chars().count() + number.len());
+                let mut about = vec![kind_label(&entry.action).to_string()];
+                if let Some(place) = self.place_label(&entry.id) {
+                    about.insert(0, place);
+                }
+                let about = about.join(" · ");
+                let room = width.saturating_sub(indent.len() + about.chars().count() + 3);
+                ListItem::new(Text::from(vec![
+                    Line::from(vec![
+                        Span::styled(icon, Style::default().fg(self.theme.success())),
+                        Span::styled(number, Style::default().fg(self.theme.faint())),
+                        Span::styled(
+                            entry.name.clone(),
+                            Style::default().fg(self.theme.entry()).bold(),
+                        ),
+                        Span::raw(gap),
+                        Span::styled(word, Style::default().fg(color)),
+                        Span::styled(flags, Style::default().fg(self.theme.muted())),
+                    ]),
+                    Line::from(vec![
+                        Span::raw(indent),
+                        Span::styled(about, Style::default().fg(self.theme.faint())),
+                        Span::styled(
+                            format!("   {}", clipped(&command, room)),
+                            Style::default().fg(self.theme.muted()),
+                        ),
+                    ]),
+                ]))
             })
             .collect();
         self.fill(frame, parts[2]);
         let list = List::new(items)
-            .block(self.card("Queued entries"))
+            .block(block)
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused));
         frame.render_stateful_widget(list, parts[2], &mut self.main_state);
@@ -2802,6 +3205,19 @@ impl App {
 
     fn draw_footer(&self, frame: &mut Frame, area: Rect) {
         self.rule(frame, area.x, area.y, area.width);
+        // How the check of package entries stands, on the rule, as the
+        // window's footer says it.
+        if let Some(status) = self.check_line() {
+            let width = status.chars().count() as u16 + 2;
+            let x = area.right().saturating_sub(width + 2).max(area.x);
+            frame.render_widget(
+                Paragraph::new(Line::styled(
+                    format!(" {status} "),
+                    Style::default().fg(self.theme.faint()),
+                )),
+                Rect::new(x, area.y, width.min(area.width), 1).intersection(area),
+            );
+        }
         let (_, hints) = self.hints();
         // Help and quit sit on the right, as in the design.
         let (right, mut left): (Vec<&Hint>, Vec<&Hint>) = hints
@@ -2897,6 +3313,9 @@ impl App {
                                 list.push(Hint::new(&["u"], "Update"));
                             }
                             list.push(Hint::new(&["Space"], "Plan"));
+                            if matches!(entry.action, Action::Profile { .. }) {
+                                list.push(Hint::new(&["e"], "Its entries to plan"));
+                            }
                             list.push(Hint::new(&["d"], "Describe"));
                             list.push(Hint::new(&["p"], "Preview"));
                             list.push(Hint::new(&["v"], "Trust"));
@@ -2926,6 +3345,9 @@ impl App {
                     if !self.queue.is_empty() {
                         list.push(Hint::new(&["e"], "Changes"));
                         list.push(Hint::new(&["s"], "Save as profile"));
+                    }
+                    if self.queue.len() > 1 {
+                        list.push(Hint::new(&["K", "J"], "Move"));
                     }
                     list.push(Hint::new(&["x"], "Remove"));
                     list.push(Hint::new(&["c"], "Clear"));
@@ -3444,6 +3866,10 @@ impl App {
             self.open_palette();
             return true;
         }
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('r') {
+            self.check_again();
+            return true;
+        }
         if self.focus == Focus::Search {
             self.handle_search_key(key);
             return true;
@@ -3513,6 +3939,21 @@ impl App {
     }
 
     fn handle_main_key(&mut self, key: &KeyEvent) {
+        // The Install Plan's order: K or Shift-Up earlier, J or Shift-Down later.
+        if self.screen == Screen::Plan {
+            let shifted = key.modifiers.contains(KeyModifiers::SHIFT);
+            let by = match key.code {
+                KeyCode::Char('K') => Some(-1),
+                KeyCode::Char('J') => Some(1),
+                KeyCode::Up if shifted => Some(-1),
+                KeyCode::Down if shifted => Some(1),
+                _ => None,
+            };
+            if let Some(by) = by {
+                self.move_queued(by);
+                return;
+            }
+        }
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => self.move_selection(1),
             KeyCode::Char('k') | KeyCode::Up => self.move_selection(-1),
@@ -3521,12 +3962,18 @@ impl App {
         match self.screen {
             Screen::Dashboard => match key.code {
                 KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
-                    let screen = match self.main_state.selected().unwrap_or(0) {
-                        0 => Screen::Area(self.first_area()),
-                        1 => Screen::Plan,
-                        2 => Screen::Doctor,
-                        4 => Screen::Favorites,
-                        _ => Screen::History,
+                    let selected = self.main_state.selected().unwrap_or(0);
+                    let quick = QUICK_ACTIONS
+                        .get(selected)
+                        .map_or(Quick::Applications, |action| action.3);
+                    let screen = match quick {
+                        Quick::Applications => Screen::Area(self.first_area()),
+                        Quick::Plan => Screen::Plan,
+                        Quick::Doctor => Screen::Doctor,
+                        Quick::Favorites => Screen::Favorites,
+                        Quick::History => Screen::History,
+                        Quick::Wizard => return self.open_wizard(false),
+                        Quick::Palette => return self.open_palette(),
                     };
                     self.open_screen(screen);
                 }
@@ -3550,6 +3997,7 @@ impl App {
                     }
                 }
                 KeyCode::Char(' ') => self.toggle_queue(),
+                KeyCode::Char('e') => self.queue_profile_entries(),
                 KeyCode::Char('c') => self.check_selected(),
                 KeyCode::Char('o') if self.in_profiles() => {
                     self.popup = Some(Popup::Ask(
@@ -4293,6 +4741,51 @@ impl App {
         }
     }
 
+    /// Move the selected Install Plan entry earlier (-1) or later (1), as
+    /// the window's arrows do; the selection follows it.
+    fn move_queued(&mut self, by: isize) {
+        let Some(selected) = self.main_state.selected() else {
+            return;
+        };
+        let Some(target) = selected.checked_add_signed(by) else {
+            return;
+        };
+        if selected >= self.queue.len() || target >= self.queue.len() {
+            return;
+        }
+        self.queue.swap(selected, target);
+        self.main_state.select(Some(target));
+    }
+
+    /// Queue the selected profile's entries one by one, those not queued
+    /// yet, to change the plan before it runs; then show the Install Plan.
+    fn queue_profile_entries(&mut self) {
+        let Some(entry) = self.selected_entry().cloned() else {
+            return;
+        };
+        let Action::Profile { entries } = &entry.action else {
+            return;
+        };
+        let mut added = 0;
+        for id in entries {
+            if let Some(found) = self.catalog.find(id).cloned()
+                && found.multi_select
+                && !self.queue.iter().any(|queued| queued.id == found.id)
+            {
+                self.queue.push(found);
+                added += 1;
+            }
+        }
+        self.open_screen(Screen::Plan);
+        self.focus = Focus::Main;
+        let text = if added == 0 {
+            "Its entries are already in the Install Plan.".to_string()
+        } else {
+            format!("{added} of its entries were added to the Install Plan. Nothing has run.")
+        };
+        self.popup = Some(Popup::Text(TextPopup::new(entry.name.clone(), text, true)));
+    }
+
     fn preview(&mut self) {
         let Some(entry) = self.selected_entry() else {
             return;
@@ -4334,21 +4827,61 @@ impl App {
         let Some(entry) = self.selected_entry() else {
             return;
         };
-        let mut text = if entry.description.is_empty() {
-            "This entry has no description.".to_string()
+        // As the window's details: where it is, what kind, whether it asks.
+        let mut tags = vec![kind_label(&entry.action).to_string()];
+        if matches!(
+            entry.action,
+            Action::Script {
+                interactive: true,
+                ..
+            }
+        ) {
+            tags.push("Asks questions".to_string());
+        }
+        if !entry.multi_select {
+            tags.push("Runs on its own".to_string());
+        }
+        let mut text = String::new();
+        if let Some(place) = self.place_label(&entry.id) {
+            text.push_str(&format!("{place}\n"));
+        }
+        text.push_str(&tags.join(" · "));
+        text.push_str("\n\n");
+        text.push_str(if entry.description.is_empty() {
+            "This entry has no description."
         } else {
-            entry.description.clone()
-        };
+            &entry.description
+        });
         if let Some(status) = self.statuses.get(&entry.id) {
             let detail = status.detail();
             text.push_str(&format!("\n\nStatus: {}", status.label()));
             if !detail.is_empty() {
-                text.push_str(&format!(" ({detail})"));
+                text.push_str(&format!("\nInstalled from: {detail}"));
             }
             if let Status::Update { .. } = status {
                 text.push_str(
                     "\nThe repository metadata on this machine has a newer version: u updates it (on Arch, with the whole system).",
                 );
+            }
+        }
+        if let Action::Profile { entries } = &entry.action
+            && !entries.is_empty()
+        {
+            text.push_str("\n\nRuns, in order:");
+            for (number, id) in entries.iter().enumerate() {
+                let name = self
+                    .catalog
+                    .find(id)
+                    .map_or(id.as_str(), |found| found.name.as_str());
+                text.push_str(&format!("\n  {}. {name}", number + 1));
+            }
+            text.push_str("\n\ne puts its entries in the Install Plan one by one, to change the plan before it runs.");
+        }
+        let meanings = flag_meanings(&entry.flags);
+        if !meanings.is_empty() {
+            text.push_str("\n\nWhat it does:");
+            for (flag, meaning) in meanings {
+                text.push_str(&format!("\n  {flag:<4}{meaning}"));
             }
         }
         self.popup = Some(Popup::Text(TextPopup::new(entry.name.clone(), text, true)));
@@ -4718,7 +5251,7 @@ impl App {
                 Act::Open(item.screen),
             );
         }
-        let actions: [(&str, &str, Act); 16] = [
+        let actions: [(&str, &str, Act); 17] = [
             (
                 "Check updates online",
                 "updates refresh",
@@ -4767,6 +5300,11 @@ impl App {
                 "Update every entry with an update",
                 "upgrade packages",
                 Act::UpdateEntries,
+            ),
+            (
+                "Check again what is installed",
+                "status refresh packages installed",
+                Act::CheckStatuses,
             ),
             ("Change the theme", "colors colors look", Act::Theme),
             (
@@ -4908,6 +5446,7 @@ impl App {
                 }
             }
             Act::Report => self.make_report(),
+            Act::CheckStatuses => self.check_again(),
             Act::UpdateEntries => {
                 let waiting: Vec<Entry> = self
                     .catalog
@@ -10801,6 +11340,66 @@ fn removable(entry: &Entry) -> bool {
     )
 }
 
+/// What kind of entry it is, in the window's words.
+fn kind_label(action: &Action) -> &'static str {
+    match action {
+        Action::Package { .. } => "Package",
+        Action::Script { .. } => "Script",
+        Action::Command { .. } => "Command",
+        Action::Nix { .. } => "Nix",
+        Action::Native { .. } => "Built in",
+        Action::Profile { .. } => "Profile",
+    }
+}
+
+/// Each word of a flags field and what it means, as the flags guide says;
+/// P before a known flag makes it privileged.
+fn flag_meanings(field: &str) -> Vec<(String, String)> {
+    const MEANINGS: [(&str, &str); 9] = [
+        ("D", "disk changes, such as partitioning (privileged)"),
+        ("FI", "Flatpak installation"),
+        ("FM", "file changes"),
+        ("I", "installation (privileged)"),
+        ("K", "kernel changes (privileged)"),
+        ("MP", "package manager actions"),
+        ("SI", "full system installation"),
+        ("SS", "service actions (privileged)"),
+        ("RP", "package removal"),
+    ];
+    let meaning = |flag: &str| {
+        MEANINGS
+            .iter()
+            .find(|(known, _)| *known == flag)
+            .map(|(_, meaning)| *meaning)
+    };
+    field
+        .split_whitespace()
+        .map(|flag| {
+            let privileged = flag
+                .strip_prefix('P')
+                .filter(|base| !base.is_empty())
+                .and_then(meaning);
+            let said = match (privileged, meaning(flag)) {
+                (Some(base), _) => format!("{base}, privileged"),
+                (None, Some(known)) => known.to_string(),
+                (None, None) => "unknown flag".to_string(),
+            };
+            (flag.to_string(), said)
+        })
+        .collect()
+}
+
+/// The text cut to `width` characters, ending in "…" when it was cut.
+fn clipped(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        return text.to_string();
+    }
+    let mut cut: String = text.chars().take(width.saturating_sub(1)).collect();
+    cut.truncate(cut.trim_end().len());
+    cut.push('…');
+    cut
+}
+
 fn build_menu(catalog: &Catalog) -> Vec<MenuItem> {
     let area = |id: &str| catalog.tabs.iter().position(|tab| tab.id == id);
     let mut menu = vec![MenuItem {
@@ -11312,11 +11911,52 @@ mod tests {
     fn quick_actions_open_screens() {
         let mut app = app();
         press(&mut app, KeyCode::Enter);
-        press(&mut app, KeyCode::Char('j'));
-        press(&mut app, KeyCode::Char('j'));
+        for _ in 0..4 {
+            press(&mut app, KeyCode::Char('j'));
+        }
         press(&mut app, KeyCode::Enter);
         assert_eq!(app.screen, Screen::Doctor);
         assert!(screen(&mut app, 120, 40).contains("Machine Summary"));
+    }
+
+    #[test]
+    fn quick_actions_set_up_the_machine_and_find_anything() {
+        let mut app = app();
+        press(&mut app, KeyCode::Enter);
+        let text = screen(&mut app, 120, 40);
+        assert!(text.contains("Set up this machine"), "{text}");
+        assert!(text.contains("Find anything"), "{text}");
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Enter);
+        assert!(matches!(app.popup, Some(Popup::Wizard(_))));
+        app.popup = None;
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Enter);
+        assert!(matches!(app.popup, Some(Popup::Palette(_))));
+    }
+
+    #[test]
+    fn the_dashboard_counts_what_is_installed_queued_and_pinned() {
+        let mut app = app();
+        app.statuses.insert(
+            "ripgrep".to_string(),
+            Status::Installed {
+                source: "pacman".to_string(),
+                version: Some("15.2.0-1".to_string()),
+                shadowed: None,
+            },
+        );
+        app.favorites.push("marker".to_string());
+        let text = screen(&mut app, 120, 40);
+        assert!(text.contains("1 installed"), "{text}");
+        assert!(text.contains("0 updates"), "{text}");
+        assert!(text.contains("0 queued"), "{text}");
+        assert!(text.contains("1 pinned"), "{text}");
+        // Taller, the counts are tiles.
+        let tall = screen(&mut app, 120, 60);
+        assert!(tall.contains("╭"), "{tall}");
+        assert!(tall.contains("1 installed"), "{tall}");
     }
 
     #[test]
@@ -11433,7 +12073,7 @@ mod tests {
         press(&mut app, KeyCode::Enter);
         press(&mut app, KeyCode::Char('d'));
         assert!(
-            screen(&mut app, 140, 40).contains("Status: Managed (Home Manager 0.74.4)"),
+            screen(&mut app, 140, 40).contains("Installed from: Home Manager 0.74.4"),
             "the description says it too"
         );
     }
@@ -13123,6 +13763,255 @@ mod tests {
         app.focus = Focus::Main;
         press(&mut app, KeyCode::Char('b'));
         assert!(screen(&mut app, 140, 40).contains("Profile  "));
+    }
+
+    fn queue_ids(app: &App) -> Vec<String> {
+        app.queue.iter().map(|entry| entry.id.clone()).collect()
+    }
+
+    #[test]
+    fn the_sidebar_counts_what_is_pinned_queued_and_waiting() {
+        let mut app = app();
+        for id in ["git", "ripgrep"] {
+            let entry = app.catalog.find(id).unwrap().clone();
+            app.toggle_queued(entry);
+        }
+        app.favorites.push("fzf".to_string());
+        app.statuses.insert(
+            "fzf".to_string(),
+            Status::Update {
+                source: "pacman".to_string(),
+                version: Some("0.60".to_string()),
+                latest: Some("0.61".to_string()),
+                shadowed: None,
+            },
+        );
+        let text = screen(&mut app, 120, 40);
+        let line = |label: &str| {
+            text.lines()
+                .find(|line| line.contains(label))
+                .unwrap_or_default()
+                .to_string()
+        };
+        let sidebar = |line: String| {
+            line.chars()
+                .take(SIDEBAR_WIDTH as usize)
+                .collect::<String>()
+        };
+        assert!(sidebar(line("Install Plan")).contains(" 2 │"), "{text}");
+        assert!(sidebar(line("Favorites")).contains(" 1"), "{text}");
+        assert!(sidebar(line("Updates")).contains(" 1"), "{text}");
+        // Nothing to count, nothing shown.
+        assert!(
+            !sidebar(line("History")).chars().any(|c| c.is_ascii_digit()),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_header_shows_the_version_where_it_fits() {
+        let mut app = app();
+        let wide = screen(&mut app, 120, 40);
+        assert!(
+            wide.contains(concat!("v", env!("CARGO_PKG_VERSION"))),
+            "{wide}"
+        );
+        app.size_bypass = true;
+        let narrow = screen(&mut app, 40, 30);
+        assert!(
+            narrow.contains("HELIX TOOLBOX") && narrow.contains("SYSTEM READY"),
+            "{narrow}"
+        );
+    }
+
+    #[test]
+    fn the_footer_says_how_the_check_stands_and_ctrl_r_checks_again() {
+        let mut app = app();
+        assert!(!screen(&mut app, 120, 40).contains("package entries checked"));
+        app.statuses.insert(
+            "fzf".to_string(),
+            Status::Absent {
+                replaces: Vec::new(),
+            },
+        );
+        let text = screen(&mut app, 120, 40);
+        assert!(
+            text.contains("1 package entries checked · Ctrl-R check again"),
+            "{text}"
+        );
+        let (_sender, receiver) = mpsc::channel();
+        app.checking = Some(receiver);
+        assert!(screen(&mut app, 120, 40).contains("Checking what is installed…"));
+        // Off in tests, Ctrl-R starts nothing, and the palette offers it too.
+        app.checking = None;
+        app.handle_key(&KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+        assert!(app.checking.is_none() && app.popup.is_none());
+        let (choices, _) = app.palette_choices();
+        assert!(
+            choices
+                .iter()
+                .any(|choice| choice.label == "Check again what is installed")
+        );
+    }
+
+    #[test]
+    fn area_rows_say_what_entries_and_groups_hold_and_results_where_they_are() {
+        let mut app = app();
+        app.open_screen(Screen::Area(app.first_area()));
+        app.focus = Focus::Main;
+        let text = screen(&mut app, 160, 40);
+        let group = app
+            .rows
+            .iter()
+            .find_map(|row| match row {
+                Row::Group { name, count, .. } => Some((name.clone(), *count)),
+                _ => None,
+            })
+            .unwrap();
+        let line = text.lines().find(|line| line.contains(&group.0)).unwrap();
+        assert!(
+            line.trim_end()
+                .trim_end_matches('│')
+                .trim_end()
+                .ends_with(&group.1.to_string()),
+            "{line}"
+        );
+        press(&mut app, KeyCode::Char('/'));
+        type_text(&mut app, "ripgrep");
+        let text = screen(&mut app, 160, 40);
+        let row = text.lines().find(|line| line.contains("Ripgrep")).unwrap();
+        assert!(row.contains("Applications › "), "{row}");
+        // A row that cannot be queued is marked as running on its own.
+        let alone = app
+            .catalog
+            .entries()
+            .into_iter()
+            .find(|entry| !entry.multi_select)
+            .unwrap()
+            .clone();
+        press(&mut app, KeyCode::Esc);
+        app.rows = vec![Row::Entry(Box::new(alone.clone()))];
+        let text = screen(&mut app, 160, 40);
+        assert!(text.contains(&format!("[>]  {}", alone.name)), "{text}");
+    }
+
+    #[test]
+    fn details_say_where_an_entry_is_its_kind_and_its_flags() {
+        let mut app = app();
+        app.open_screen(Screen::Area(app.first_area()));
+        app.focus = Focus::Main;
+        press(&mut app, KeyCode::Char('/'));
+        type_text(&mut app, "ripgrep");
+        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::Char('d'));
+        let text = screen(&mut app, 140, 45);
+        assert!(text.contains("Applications › "), "{text}");
+        assert!(text.contains("Package"), "{text}");
+        assert!(text.contains("What it does:"), "{text}");
+        assert!(text.contains("installation (privileged)"), "{text}");
+        assert_eq!(
+            flag_meanings("PI FM X"),
+            vec![
+                (
+                    "PI".to_string(),
+                    "installation (privileged), privileged".to_string()
+                ),
+                ("FM".to_string(), "file changes".to_string()),
+                ("X".to_string(), "unknown flag".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_profile_shows_what_it_runs_and_e_queues_its_entries() {
+        let mut app = app();
+        let profile = app.catalog.find("developer-basics").unwrap().clone();
+        let Action::Profile { entries } = &profile.action else {
+            panic!("not a profile");
+        };
+        let entries = entries.clone();
+        app.rows = vec![Row::Entry(Box::new(profile.clone()))];
+        app.screen = Screen::Area(app.first_area());
+        app.focus = Focus::Main;
+        app.main_state.select(Some(0));
+        press(&mut app, KeyCode::Char('d'));
+        let text = screen(&mut app, 140, 45);
+        assert!(text.contains("Runs, in order:"), "{text}");
+        assert!(text.contains("1. Git") || text.contains("1. git"), "{text}");
+        app.popup = None;
+        // One entry already queued stays once.
+        let git = app.catalog.find("git").unwrap().clone();
+        app.queue.push(git);
+        app.rows = vec![Row::Entry(Box::new(profile))];
+        app.main_state.select(Some(0));
+        press(&mut app, KeyCode::Char('e'));
+        assert_eq!(app.screen, Screen::Plan);
+        assert_eq!(queue_ids(&app), entries);
+        assert!(screen(&mut app, 140, 40).contains("3 of its entries were added"));
+        app.popup = None;
+        app.open_screen(Screen::Area(app.first_area()));
+        app.rows = vec![Row::Entry(Box::new(
+            app.catalog.find("developer-basics").unwrap().clone(),
+        ))];
+        app.main_state.select(Some(0));
+        app.focus = Focus::Main;
+        press(&mut app, KeyCode::Char('e'));
+        assert!(screen(&mut app, 140, 40).contains("Its entries are already in the Install Plan"));
+    }
+
+    #[test]
+    fn the_install_plan_moves_entries_and_says_what_each_is() {
+        let mut app = app();
+        for id in ["git", "ripgrep", "fzf"] {
+            let entry = app.catalog.find(id).unwrap().clone();
+            app.toggle_queued(entry);
+        }
+        app.open_screen(Screen::Plan);
+        app.focus = Focus::Main;
+        app.main_state.select(Some(0));
+        press(&mut app, KeyCode::Char('J'));
+        assert_eq!(queue_ids(&app), ["ripgrep", "git", "fzf"]);
+        assert_eq!(app.main_state.selected(), Some(1));
+        app.handle_key(&KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT));
+        assert_eq!(queue_ids(&app), ["ripgrep", "fzf", "git"]);
+        press(&mut app, KeyCode::Char('K'));
+        press(&mut app, KeyCode::Char('K'));
+        assert_eq!(queue_ids(&app), ["git", "ripgrep", "fzf"]);
+        // At the top, it stays.
+        press(&mut app, KeyCode::Char('K'));
+        assert_eq!(queue_ids(&app), ["git", "ripgrep", "fzf"]);
+        app.statuses.insert(
+            "fzf".to_string(),
+            Status::Absent {
+                replaces: Vec::new(),
+            },
+        );
+        let text = screen(&mut app, 140, 50);
+        assert!(text.contains("Queued entries · 3"), "{text}");
+        assert!(text.contains("1. Git") || text.contains("1. git"), "{text}");
+        assert!(text.contains("Applications › "), "{text}");
+        assert!(text.contains(" · Package"), "{text}");
+        assert!(text.contains("Not installed"), "{text}");
+        assert!(text.contains("K/J Move"), "{text}");
+    }
+
+    #[test]
+    fn screens_are_found_by_name_for_the_command_line() {
+        let app = app();
+        assert_eq!(app.screen_named("updates"), Some(Screen::Updates));
+        assert_eq!(app.screen_named("Home-Manager"), Some(Screen::HomeManager));
+        assert_eq!(
+            app.screen_named("applications"),
+            Some(Screen::Area(app.first_area()))
+        );
+        assert_eq!(app.screen_named("nowhere"), None);
+        assert!(app.screen_names().contains("doctor, updates, drift"));
+        assert!(
+            app.screen_names().ends_with("profiles") || app.screen_names().contains("applications")
+        );
+        let mut app = app;
+        app.open_on(Screen::Doctor);
+        assert_eq!((app.screen, app.focus), (Screen::Doctor, Focus::Main));
     }
 
     #[test]
