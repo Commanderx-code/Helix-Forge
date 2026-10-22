@@ -42,6 +42,11 @@ pub struct TextPopup {
 }
 
 impl TextPopup {
+    /// What the popup is titled.
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
     pub fn new(title: impl Into<String>, text: impl Into<String>, wrap: bool) -> Self {
         let text = text.into();
         Self {
