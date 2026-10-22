@@ -235,6 +235,15 @@ what is there already, and what it cannot bring, such as packages another
 distribution names differently, so you can look for them yourself. `a`
 reviews the plan before anything is installed.
 
+## Your own files
+
+**Restic** looks after the backups of your own files, once the repository
+is named under `[restic]` in `settings.toml`. Lost a file? `s` finds every
+version of it across the snapshots, and `R` puts the one you want into a
+new folder, without touching anything else. A recovery test (`n` on a file
+that matters, then `v`) shows a restore of it really works, and `w` backs
+up every day by itself.
+
 ## Your projects
 
 **Repositories** gathers the Git repositories under your project folders,

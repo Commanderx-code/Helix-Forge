@@ -85,6 +85,10 @@ settings, profiles and history over ([what changed](https://github.com/Commander
   another machine or distribution: catalog entries become that
   distribution's packages, Flatpaks come from Flathub, and the packages
   that do not translate are listed for you.
+- **Restic backups**: the snapshots of your own files, a file's history
+  across them, restores into a new folder that overwrite nothing, backups
+  on a timer, and recovery tests that restore a file and compare its
+  SHA-256.
 - **Performance and recovery**: how long the boot took and where the time
   went, each boot beside an earlier one with the runs in between; and
   whether the machine could be brought back: snapshots and booting one, a

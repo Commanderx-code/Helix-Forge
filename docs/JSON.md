@@ -300,6 +300,25 @@ standing, detail}]}`. `family` is the package family the file was made on
 family, architecture, made, entries, flatpaks, packages}`, entry ids,
 Flatpak ids and package names; nothing is written.
 
+## restic
+
+`{configured, repository, origin, password, paths, excludes, problem,
+snapshots, snapshots_problem, timer}`. `origin` is `settings`,
+`environment` or `command-center`; `password` says where restic gets it
+(never the password); `problem` why the settings cannot be used, or
+`null`. `snapshots` are `[{id, short_id, time, hostname, paths, tags}]`,
+newest first, with `snapshots_problem` what restic said when it could not
+read them; `timer` is `day`, `week` or `null`.
+
+## restic-files, restic-history, restic-baselines
+
+`restic files`: `{snapshot, folder, nodes: [{name, type, path, size,
+mtime}]}`, folders first. `restic history`: `{pattern, files: [{path,
+versions: [{snapshot, short_id, time, hostname, size, mtime, change}],
+missing_from}]}`, `change` `first`, `changed` or `same`, newest version
+first. `restic baseline`: `{baselines: [{id, path, sha256, recorded}]}`,
+newest first; recording one prints it as `restic-baseline`.
+
 ## repositories
 
 `repos`: `{roots, depth, origin, repositories: [{name, path, branch,

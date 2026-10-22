@@ -1,7 +1,7 @@
 // Sample answers for working on the interface in a browser, where there is
 // no Tauri side. Nothing here reads or changes the machine.
 
-import type { AreaView, ChangesView, EntryView, ItemView, Migration, MigrationExportView, PerformanceView, Prepared, RecordView, RecoveryView, RepositoryView, ReposView, RunEvent, TranslationView, ServicesView, StatusView, StorageView, WindowTheme } from './types';
+import type { AreaView, ChangesView, EntryView, ItemView, Migration, MigrationExportView, PerformanceView, Prepared, RecordView, RecoveryView, RepositoryView, ReposView, ResticView, ResticNode, ResticHistory, RunEvent, TranslationView, ServicesView, StatusView, StorageView, WindowTheme } from './types';
 
 const entry = (id: string, name: string, description: string, flags = 'I', extra: Partial<EntryView> = {}): ItemView => ({
   type: 'entry',
@@ -598,6 +598,52 @@ export async function call(command: string, args: Record<string, unknown> = {}):
           { name: 'htop', detail: 'sudo pacman -S --needed htop' },
         ],
       } satisfies Prepared;
+    case 'read_restic':
+      return {
+        configured: true,
+        repository: '/run/media/me/Backup/restic',
+        origin: "Helix Toolbox's settings",
+        password: 'the file /home/me/.config/restic/password',
+        paths: ['/home/me'],
+        excludes: ['/home/me/.cache', '/home/me/.local/share/Trash'],
+        problem: null,
+        snapshots: [
+          { id: 'b6f77f6d0a1b2c3d', short_id: 'b6f77f6d', time: '2026-10-21T22:00:04+02:00', hostname: 't15p', paths: ['/home/me'] },
+          { id: 'aa0d9cfe9e8d7c6b', short_id: 'aa0d9cfe', time: '2026-10-20T22:00:02+02:00', hostname: 't15p', paths: ['/home/me'] },
+        ],
+        timer: 'every day',
+        restores: true,
+        baselines: [{ id: '1792600000000', path: '/home/me/Documents/taxes.ods', sha256: '5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03', recorded: 1_792_600_000 }],
+        home: '/home/me',
+      } satisfies ResticView;
+    case 'restic_files':
+      return [
+        { name: 'Documents', type: 'dir', path: '/home/me/Documents' },
+        { name: 'notes.txt', type: 'file', path: '/home/me/notes.txt', size: 1200 },
+      ] satisfies ResticNode[];
+    case 'restic_history':
+      return [
+        {
+          path: '/home/me/notes.txt',
+          missing_from: 0,
+          versions: [
+            { snapshot: 'b6f77f6d0a1b2c3d', short_id: 'b6f77f6d', time: '2026-10-21T22:00:04+02:00', hostname: 't15p', size: 1200, mtime: null, change: 'changed' },
+            { snapshot: 'aa0d9cfe9e8d7c6b', short_id: 'aa0d9cfe', time: '2026-10-20T22:00:02+02:00', hostname: 't15p', size: 1100, mtime: null, change: 'first' },
+          ],
+        },
+      ] satisfies ResticHistory[];
+    case 'prepare_restic':
+      return {
+        kind: 'ready',
+        risk: 'low',
+        privileged: false,
+        header: ['Risk: low'],
+        lines: [{ name: 'Restore from the restic repository', detail: "mkdir '/home/me/restored'; restic restore b6f77f6d --target /home/me/restored --overwrite never --verify" }],
+      } satisfies Prepared;
+    case 'record_baseline':
+      return { id: '1792600000001', path: String(args.path), sha256: '5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03', recorded: 1_792_600_001 };
+    case 'set_restic_timer':
+      return args.on ? 'The backup runs every day.' : 'The timed backup is off.';
     case 'prepare_snapshot_check':
       return {
         kind: 'ready',

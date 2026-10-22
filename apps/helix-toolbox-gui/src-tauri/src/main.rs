@@ -20,7 +20,7 @@ use helix_toolbox_engine::{
     overview::Overview,
     performance, plan, plan_removal, preflight, preview, profiles, recovery,
     reliability::{self, Evidence},
-    repositories, services,
+    repositories, restic, services,
     settings::{self, RunChoices, WindowTheme},
     setup, storage, trust, updates, verification, watch, workspaces,
 };
@@ -1578,6 +1578,227 @@ async fn prepare_migration(app: AppHandle, path: String) -> Result<PreparedView,
     .await
 }
 
+// Restic
+
+/// The repository and its snapshots, as `helix-toolbox restic` shows them.
+#[derive(Serialize)]
+struct ResticView {
+    configured: bool,
+    repository: Option<String>,
+    origin: Option<&'static str>,
+    password: Option<String>,
+    paths: Vec<String>,
+    excludes: Vec<String>,
+    /// Why the settings cannot be used, or restic could not read the
+    /// repository.
+    problem: Option<String>,
+    snapshots: Vec<restic::Snapshot>,
+    /// How often the timer backs up, when it is on.
+    timer: Option<&'static str>,
+    /// Whether this restic restores without overwriting (0.17 and later).
+    restores: bool,
+    baselines: Vec<restic::Baseline>,
+    home: String,
+}
+
+fn restic_ready() -> Result<restic::Config, String> {
+    match restic::here() {
+        restic::Found::Ready(config) => Ok(config),
+        restic::Found::Problem(why) => Err(why),
+        restic::Found::Missing => Err("No restic repository is set up.".to_string()),
+    }
+}
+
+fn restic_home() -> Result<PathBuf, String> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| "there is no home folder".to_string())
+}
+
+/// `~/` made the home folder.
+fn typed_path(home: &Path, text: &str) -> PathBuf {
+    match text.trim().strip_prefix("~/") {
+        Some(rest) => home.join(rest),
+        None => PathBuf::from(text.trim()),
+    }
+}
+
+#[tauri::command]
+async fn read_restic(app: AppHandle) -> Result<ResticView, String> {
+    blocking(app, |_| {
+        let found = restic::here();
+        let mut view = ResticView {
+            configured: false,
+            repository: None,
+            origin: None,
+            password: None,
+            paths: Vec::new(),
+            excludes: Vec::new(),
+            problem: None,
+            snapshots: Vec::new(),
+            timer: restic::units_here()
+                .and_then(|units| restic::timer(&units))
+                .map(restic::Every::label),
+            restores: false,
+            baselines: history::state_dir()
+                .map(|state| restic::baselines(&state))
+                .unwrap_or_default(),
+            home: std::env::var("HOME").unwrap_or_default(),
+        };
+        match found {
+            restic::Found::Ready(config) => {
+                view.configured = true;
+                view.repository = Some(config.repository.clone());
+                view.origin = Some(config.origin.label());
+                view.password = Some(config.password.describe());
+                view.paths = config
+                    .paths
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect();
+                view.excludes = config.excludes.clone();
+                match restic::snapshots(&restic::Here, &config) {
+                    Ok(listed) => view.snapshots = listed,
+                    Err(why) => {
+                        view.problem = Some(format!("restic could not read the repository: {why}"))
+                    }
+                }
+                view.restores = restic::restores_safely(&restic::Here);
+            }
+            restic::Found::Problem(why) => view.problem = Some(why),
+            restic::Found::Missing => {}
+        }
+        view
+    })
+    .await
+}
+
+/// What a folder of a snapshot holds.
+#[tauri::command]
+async fn restic_files(
+    app: AppHandle,
+    snapshot: String,
+    folder: String,
+) -> Result<Vec<restic::Node>, String> {
+    blocking(app, move |_| {
+        restic::files(&restic::Here, &restic_ready()?, &snapshot, &folder)
+    })
+    .await?
+}
+
+/// Every version of the files a pattern matches.
+#[tauri::command]
+async fn restic_history(
+    app: AppHandle,
+    pattern: String,
+    ignore_case: bool,
+) -> Result<Vec<restic::History>, String> {
+    blocking(app, move |_| {
+        restic::history(
+            &restic::Here,
+            &restic_ready()?,
+            &restic_home()?,
+            &pattern,
+            ignore_case,
+        )
+    })
+    .await?
+}
+
+/// A restic plan: check, back up, restore into a new folder, or test a
+/// restore against a baseline.
+#[tauri::command]
+async fn prepare_restic(
+    app: AppHandle,
+    action: String,
+    snapshot: Option<String>,
+    target: Option<String>,
+    include: Option<String>,
+    baseline: Option<String>,
+) -> Result<PreparedView, String> {
+    blocking(app, move |gui| {
+        let planned = (|| -> Result<helix_toolbox_engine::Plan, String> {
+            let config = restic_ready()?;
+            let home = restic_home()?;
+            match action.as_str() {
+                "check" => Ok(restic::plan_check(&config)),
+                "backup" => Ok(restic::plan_backup(&config)),
+                "restore" => {
+                    if !restic::restores_safely(&restic::Here) {
+                        return Err("This restic cannot restore without overwriting; restic 0.17 or later can.".into());
+                    }
+                    let target = typed_path(&home, target.as_deref().unwrap_or_default());
+                    let target = restic::check_target(&home, &target)?;
+                    restic::plan_restore(
+                        &config,
+                        snapshot.as_deref().unwrap_or("latest"),
+                        &target,
+                        include.as_deref().filter(|path| !path.is_empty()),
+                    )
+                }
+                "test" => {
+                    let state = history::state_dir().ok_or("cannot find the state folder")?;
+                    let all = restic::baselines(&state);
+                    let chosen = restic::find_baseline(&all, baseline.as_deref().unwrap_or("1"))
+                        .ok_or("That baseline is not there.")?;
+                    restic::plan_test(&config, chosen, snapshot.as_deref().unwrap_or("latest"))
+                }
+                other => Err(format!("{} is not a restic plan", printable(other))),
+            }
+        })();
+        let catalog = gui.catalog.read().unwrap();
+        match planned {
+            Ok(planned) => prepare_plan(gui, &catalog, planned),
+            Err(why) => cannot(gui, why),
+        }
+    })
+    .await
+}
+
+/// Record a file's SHA-256 as a baseline, as `helix-toolbox restic baseline`.
+#[tauri::command]
+async fn record_baseline(app: AppHandle, path: String) -> Result<restic::Baseline, String> {
+    blocking(app, move |_| {
+        let home = restic_home()?;
+        let state = history::state_dir().ok_or("cannot find the state folder")?;
+        restic::record(&state, &home, &typed_path(&home, &path), history::now())
+    })
+    .await?
+}
+
+/// Turn the timed backup on or off, as `helix-toolbox restic timer`.
+#[tauri::command]
+async fn set_restic_timer(app: AppHandle, on: bool, weekly: bool) -> Result<String, String> {
+    blocking(app, move |gui| {
+        let units = restic::units_here().ok_or("there is no home folder to keep the timer in")?;
+        if !on {
+            restic::timer_off(&units, &notifications::systemctl)?;
+            return Ok("The timed backup is off.".to_string());
+        }
+        let every = if weekly {
+            restic::Every::Week
+        } else {
+            restic::Every::Day
+        };
+        let started = restic::timer_on(
+            &units,
+            &gui.this,
+            &restic_ready()?,
+            every,
+            &notifications::systemctl,
+        )?;
+        Ok(format!(
+            "The backup runs {}{}.",
+            every.label(),
+            match started {
+                notifications::Started::Now => "",
+                notifications::Started::AtLogin => ", from the next login",
+            }
+        ))
+    })
+    .await?
+}
+
 // Repositories
 
 /// The repositories found, as `helix-toolbox repos --json` lists them.
@@ -2480,6 +2701,8 @@ fn main() {
                 prepare_service, prepare_autostart, read_storage, prepare_clean,
                 read_performance, compare_boots, read_recovery, prepare_snapshot_check,
                 read_migration_export, export_migration, open_migration, prepare_migration,
+                read_restic, restic_files, restic_history, prepare_restic, record_baseline,
+                set_restic_timer,
                 read_repositories, read_repository, repository_diff, prepare_repository_change,
                 prepare_task, save_workspace,
                 drift_check, save_baseline, reliability, trust, read_hardware, prepare_firmware,

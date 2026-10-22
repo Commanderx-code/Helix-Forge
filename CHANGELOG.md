@@ -6,6 +6,20 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
 
 ## v1.20.0
 
+- **Restic.** **Restic**, in the window and the terminal interface, shows
+  the restic repository of your own files and its snapshots: browse the
+  folders of one, look for every version of a file across all of them
+  (which changed, and whether newer snapshots no longer have it), and
+  restore a snapshot or one path of it into a new folder of your home
+  folder, so nothing is overwritten and what is restored is read back.
+  **Back up…** and **Check…** are plans you review, and a daily or weekly
+  timer of your session backs up by itself. Recovery tests record a
+  file's SHA-256, then restore it from a snapshot into a temporary folder
+  and compare. The repository is named under `[restic]` in
+  `settings.toml`, or read from restic's own variables or the settings
+  Command Center left; Helix Toolbox never keeps a password.
+  `helix-toolbox restic` (`files`, `history`, `backup`, `check`,
+  `restore`, `baseline`, `test`, `timer`) does the same.
 - **Repositories and project workspaces.** **Repositories**, in the window
   and the terminal interface, lists the Git repositories under your project
   folders (`~/github`, `~/projects`, `~/src`, `~/code` and `~/dotfiles`, or

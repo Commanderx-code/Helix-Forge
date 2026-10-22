@@ -28,6 +28,12 @@ fn run(home: &Path, args: &[&str]) -> (bool, String) {
         .env("XDG_DATA_HOME", home.join("data"))
         .env("XDG_CACHE_HOME", home.join("cache"))
         .env_remove("HELIX_TOOLBOX_LOG")
+        .env_remove("RESTIC_REPOSITORY")
+        .env_remove("RESTIC_PASSWORD_FILE")
+        .env_remove("RESTIC_PASSWORD_COMMAND")
+        .env_remove("RESTIC_PASSWORD")
+        .env_remove("RESTIC_WALLET")
+        .env_remove("RESTIC_WALLET_ENTRY")
         .output()
         .expect("the program runs");
     (
@@ -94,7 +100,7 @@ fn json_shapes_only_gain_fields() {
     let directory = root().join("tests/contracts/json");
     let migration = root().join("tests/contracts/files/migration-1.19.toml");
     let migration = migration.to_str().unwrap();
-    let commands: [(&str, &[&str]); 18] = [
+    let commands: [(&str, &[&str]); 20] = [
         ("system", &["system"]),
         ("list", &["list"]),
         ("search", &["search", "marker"]),
@@ -113,6 +119,8 @@ fn json_shapes_only_gain_fields() {
         ("recovery", &["recovery"]),
         ("migrate-export", &["migrate", "export"]),
         ("migration", &["migrate", "show", migration]),
+        ("restic", &["restic"]),
+        ("restic-baselines", &["restic", "baseline"]),
     ];
     let mut problems = Vec::new();
     for (name, args) in commands {

@@ -36,6 +36,7 @@ pub mod pty;
 pub mod recovery;
 pub mod reliability;
 pub mod repositories;
+pub mod restic;
 pub mod services;
 pub mod settings;
 pub mod setup;

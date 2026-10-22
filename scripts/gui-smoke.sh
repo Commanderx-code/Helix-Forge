@@ -86,6 +86,26 @@ printf '%s\n' 'version = 1' 'from = "Fedora Linux 43"' 'family = "fedora"' \
     'entries = ["marker", "not-in-this-catalog"]' \
     'flatpaks = ["com.example.Tool"]' 'packages = ["htop"]' \
     > "$work/config/helix-toolbox/from-fedora.toml"
+# A stand-in restic for the Restic screen: one snapshot of the home folder
+# with a file in it, found by a search; restores and tests are only
+# reviewed. The repository and its password are named as restic's own
+# variables and a KWallet entry would name them.
+cat > "$work/bin/restic" <<EOF
+#!/bin/sh
+echo "\$*" >> "$work/restic.log"
+snapshot=b6f77f6d00000000000000000000000000000000000000000000000000000000
+case "\$*" in
+    *' snapshots '*) printf '[{"id":"%s","short_id":"b6f77f6d","time":"2026-10-21T22:00:04+02:00","hostname":"smoke","paths":["%s"]}]\n' "\$snapshot" "$work/home" ;;
+    *' ls '*) printf '{"struct_type":"snapshot","id":"%s"}\n{"name":"home","type":"dir","path":"%s","struct_type":"node"}\n{"name":"notes.txt","type":"file","path":"%s/notes.txt","size":6,"struct_type":"node"}\n' "\$snapshot" "$work/home" "$work/home" ;;
+    *' find '*) printf '[{"matches":[{"type":"file","path":"%s/notes.txt","size":6}],"hits":1,"snapshot":"%s"}]\n' "$work/home" "\$snapshot" ;;
+    'restore --help') echo '      --overwrite behavior   (always|if-changed|if-newer|never)'; echo '      --verify               verify restored files' ;;
+esac
+EOF
+chmod +x "$work/bin/restic"
+printf 'hello\n' > "$work/home/notes.txt"
+unset RESTIC_PASSWORD RESTIC_PASSWORD_FILE RESTIC_PASSWORD_COMMAND
+export RESTIC_REPOSITORY="$work/repository" RESTIC_WALLET=smoke \
+    RESTIC_WALLET_ENTRY=restic RESTIC_WALLET_FOLDER=Passwords
 # The marker fixture writes here, which shows the run really ran.
 export HELIX_TOOLBOX_TEST_OUT="$work/marker.txt"
 # WebKitGTK on a virtual display: no GPU, no compositor.
@@ -155,6 +175,17 @@ if ! grep -qx -- '--user start helix-toolbox-updates.timer' "$work/systemctl.log
 fi
 if [ -e "$work/config/systemd/user/helix-toolbox-updates.timer" ]; then
     echo "turning the update notifications off left the timer behind" >&2
+    exit 1
+fi
+# The timed backup was started and stopped, and its files are gone; restic
+# was only asked to read.
+if ! grep -qx -- '--user restart helix-toolbox-restic.timer' "$work/systemctl.log" \
+    || [ -e "$work/config/systemd/user/helix-toolbox-restic.timer" ]; then
+    echo "the timed backup was not turned on and off" >&2
+    exit 1
+fi
+if grep -E ' (backup|restore [0-9a-f]|dump|check)( |$)' "$work/restic.log"; then
+    echo "restic was asked to change something" >&2
     exit 1
 fi
 # The hardware report's issue went to the browser, filled in.

@@ -20,6 +20,7 @@
   import Performance from './screens/Performance.svelte';
   import Recovery from './screens/Recovery.svelte';
   import Migration from './screens/Migration.svelte';
+  import Restic from './screens/Restic.svelte';
   import Repositories from './screens/Repositories.svelte';
   import Hardware from './screens/Hardware.svelte';
   import Bundles from './screens/Bundles.svelte';
@@ -78,6 +79,8 @@
         <Recovery />
       {:else if toolbox.screen.kind === 'migration'}
         <Migration />
+      {:else if toolbox.screen.kind === 'restic'}
+        <Restic />
       {:else if toolbox.screen.kind === 'repositories'}
         <Repositories />
       {:else if toolbox.screen.kind === 'hardware'}

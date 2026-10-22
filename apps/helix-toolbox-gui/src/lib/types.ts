@@ -409,6 +409,42 @@ export type TranslationView = {
   yours: number;
 };
 
+// Restic
+
+export type ResticSnapshot = { id: string; short_id: string; time: string; hostname: string; paths: string[]; tags?: string[] | null };
+
+export type ResticNode = { name: string; type: string; path: string; size?: number | null; mtime?: string | null };
+
+export type ResticVersion = {
+  snapshot: string;
+  short_id: string;
+  time: string;
+  hostname: string;
+  size: number | null;
+  mtime: string | null;
+  change: 'first' | 'changed' | 'same';
+};
+
+export type ResticHistory = { path: string; versions: ResticVersion[]; missing_from: number };
+
+export type Baseline = { id: string; path: string; sha256: string; recorded: number };
+
+/** The repository and its snapshots, as `helix-toolbox restic` shows them. */
+export type ResticView = {
+  configured: boolean;
+  repository: string | null;
+  origin: string | null;
+  password: string | null;
+  paths: string[];
+  excludes: string[];
+  problem: string | null;
+  snapshots: ResticSnapshot[];
+  timer: string | null;
+  restores: boolean;
+  baselines: Baseline[];
+  home: string;
+};
+
 // Offline bundles
 
 export type BundledEntry = { name: string; offline: boolean; network: string | null; flatpak: string | null };
