@@ -4,6 +4,26 @@ Each release is tagged `vMAJOR.MINOR.PATCH` on GitHub, with the program, its
 packages and their checksums. A release whose workflow only adopted updated
 dotfiles or Myfish sources raises the patch number and is not listed here.
 
+## v1.24.0
+
+- **Tools from their GitHub releases.** A catalog entry can install a tool
+  from its project's GitHub release, alone or as the last source after the
+  distribution's package, the AUR and Flathub. The catalog pins one file per
+  architecture by its SHA-256; the run checks the download before unpacking
+  it, takes only the program and puts it in `~/.local/bin` without root,
+  never over a file it did not install. Status, Updates, Drift and removal
+  know these installs from a record in Helix Toolbox's state folder.
+  `scripts/release-pins.py` pins entries to their latest releases and checks
+  each file against GitHub's digest and the project's checksums.
+- **Seven tools that way:** Yazi, Atuin, Starship and Glow in Terminal
+  Tools, Lazygit, Lazydocker and uv in Developer Tools. Each comes from the
+  distribution where it has the tool, else from its release.
+- **Packages the repositories lack are skipped.** Before planning, the
+  repository metadata already on the machine is asked whether it has the
+  family's package; one it lacks (a Debian package Ubuntu 22.04 does not
+  carry) is left out with a note, and the next source is used, or the plan
+  says the entry cannot run here.
+
 ## v1.22.2
 
 - **A round logo on the Dashboard.** The emblem inside the rings is the logo
