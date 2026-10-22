@@ -35,6 +35,7 @@ pub mod profiles;
 pub mod pty;
 pub mod recovery;
 pub mod reliability;
+pub mod repositories;
 pub mod services;
 pub mod settings;
 pub mod setup;
@@ -43,6 +44,7 @@ pub mod trust;
 pub mod updates;
 pub mod verification;
 pub mod watch;
+pub mod workspaces;
 
 use helix_toolbox_core::{
     Action, Entry, NativeAction, NixAction, PackageManager, Risk, Verify, valid_package_name,
