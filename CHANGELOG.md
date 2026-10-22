@@ -25,7 +25,9 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   Distributions workflow looks up each name the catalog gives Arch, Debian
   and Ubuntu, Fedora and openSUSE in that container's repositories, and the
   known gaps (Ubuntu 22.04 and 24.04 lack some newer tools) are listed in
-  `tests/package-gaps.txt`, which must stay accurate.
+  `tests/package-gaps.txt`, which must stay accurate. It found three names
+  that were wrong: Fedora's Ardour is `ardour9` and its OpenShot `openshot`,
+  and no distribution packages gopher64, which now comes from Flathub.
 
 ## v1.22.2
 
