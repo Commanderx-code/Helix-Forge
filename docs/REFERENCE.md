@@ -14,9 +14,13 @@ list, `Enter` opens a group or runs an entry, `Space` adds it to the install
 plan, `d` shows the description, `p` the script or command, `g` explains the
 flags column and `/` searches every area. The Install Plan shows what is
 queued with its risk and requirements; `Enter` runs it. Each run asks `[Y]`
-first and then runs in a terminal inside the window; `Ctrl-C` stops it and
-everything it started (if something ignores that, the window says so and a
-second `Ctrl-C` kills it), `l` saves its output, and History lists every run.
+first and then runs in a terminal inside the window, with each step beside
+it (waiting, running, done, failed with its exit status, or skipped), how
+many steps have ended, and the run's warnings and, at the end, its result
+and every check, those done after the next reboot or not checked here marked
+so; `Ctrl-C` stops it and everything it started (if something ignores that,
+the window says so and a second `Ctrl-C` kills it), `l` saves its output, and
+History lists every run.
 `?` shows all keys and `q` quits. The menu needs a terminal; the commands
 below also work without one.
 
@@ -703,7 +707,11 @@ distribution, desktop, model and graphics cards with their drivers (no
 serial numbers, host name or user), with the `[[hardware]]` record it asks
 for and a link that opens the issue form filled in. It is refused for a run
 that failed and in a virtual machine or a container. Nothing is sent until
-you submit the issue.
+you submit the issue. In the terminal interface, `c` copies the report with
+its link, as it does the bug report from Settings: through `wl-copy`, `xclip`
+or `xsel` where the desktop has one, otherwise by asking the terminal itself
+(OSC 52, which Ghostty, Kitty, WezTerm, foot and tmux understand). Both are
+also saved under `~/.local/state/helix-toolbox/`.
 
 `v` on any entry (or `helix-toolbox trust <id>`) opens the **trust inspector**:
 the installer's origin (Helix Toolbox's own installers, Linutil's, or commands
