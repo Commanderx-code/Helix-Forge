@@ -451,9 +451,11 @@ does the same.
   Arch the advice to keep `linux-lts` beside the kernel.
 - **Configuration backups**: how many Helix Toolbox's entries left, and
   the newest.
-- **Your own files**: a backup program for the home folder (Borg, restic,
-  Kopia, Déjà Dup, Pika Backup, Vorta, Back In Time and others), since
-  system snapshots leave `/home` out and share the disk.
+- **Your own files**: the restic repository Restic backs up to, with its
+  newest snapshot once Restic has read them (listing them here could ask
+  for its password), else a backup program for the home folder (Borg,
+  restic, Kopia, Déjà Dup, Pika Backup, Vorta, Back In Time and others),
+  since system snapshots leave `/home` out and share the disk.
 - **A record of this machine**: the newest Drift baseline, a notice when
   there is none or it is over 90 days old.
 
@@ -544,7 +546,8 @@ did not write. `helix-toolbox restic` (`files <snapshot> [folder]`,
 `history <pattern>`, `backup`, `check`, `restore <snapshot> <folder>
 [--include <path>]`, `baseline [file]`, `test <baseline> [snapshot]` and
 `timer on|off [--weekly]`; plans with `--dry-run` and `--yes`, confirmed by
-typing BACKUP, CHECK, RESTORE or TEST) does the same.
+typing BACKUP, CHECK, RESTORE or TEST) does the same. Settings turns the
+timed backup on, every day or every week, and off as well.
 
 ## Repositories
 
@@ -598,6 +601,31 @@ say so (`--shell`).
 repository by its name, or its path when names repeat; changes with
 `--dry-run` and `--yes`, confirmed by typing GIT, a task by typing TASK)
 does the same.
+
+## Home Manager
+
+**Home Manager** shows the configuration Home Manager builds: the folder
+`flake` names under `[home_manager]` in `settings.toml` (`~/` for the home
+folder; `folder#name` or `profile` for the flake's `homeConfigurations`
+name), else the dotfiles Command Center was set up with (their
+`home-manager` folder when it holds `flake.nix`) and its profile, read only,
+else `~/.config/home-manager`, holding `flake.nix` or `home.nix`. Below it,
+the generations `home-manager generations` lists, newest first, with the
+active one marked; the configuration's Git repository (the nearest folder
+above it holding `.git`, within your home folder), read as Repositories
+reads one; and which of your configuration files (Ghostty's, Fastfetch's,
+fish's, Git's, kitty's and Neovim's) Home Manager links into the Nix
+store, so are changed in the configuration rather than in place.
+
+`b` builds the configuration without activating it (`home-manager build`,
+in its folder, which leaves a `result` link), `s` switches to it, and
+`Enter` on an earlier generation goes back to it by running that
+generation's own `activate` script, as Home Manager's manual says to; a
+generation the Nix store has collected cannot be. `p` pulls the
+configuration's repository, fast-forward only. Each is a plan you review.
+`helix-toolbox home-manager` (`generations`, `build`, `switch`, `activate
+<generation>`, `pull`; plans with `--dry-run` and `--yes`, confirmed by
+typing BUILD, SWITCH, ACTIVATE or GIT) does the same.
 
 ## Reliability and trust
 
@@ -722,6 +750,7 @@ helix-toolbox migrate show <file>        # what a migration means here; migrate 
 helix-toolbox restic                     # the repository and its snapshots; history, restore, test
 helix-toolbox repos                      # the Git repositories under your project folders
 helix-toolbox repos show <repo>          # its changes, branches, stashes, commits and tasks; stage, commit, push...
+helix-toolbox home-manager               # its configuration and generations; build, switch, activate, pull
 helix-toolbox reliability --critical     # how far the boot, login and driver entries are tested
 helix-toolbox trust sddm                 # where an entry comes from and what checks it
 helix-toolbox doctor                     # health checks, read-only

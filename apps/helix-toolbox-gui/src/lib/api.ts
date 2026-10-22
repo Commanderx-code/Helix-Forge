@@ -29,6 +29,7 @@ import type {
   TranslationView,
   RepoChange,
   RepoDiff,
+  HomeManagerView,
   ReposView,
   RepositoryView,
   RepoTask,
@@ -127,6 +128,10 @@ export const prepareRestic = (
 export const recordBaseline = (path: string) => call<Baseline>('record_baseline', { path });
 export const setResticTimer = (on: boolean, weekly: boolean) => call<string>('set_restic_timer', { on, weekly });
 export const repositories = () => call<ReposView>('read_repositories');
+export const homeManager = () => call<HomeManagerView>('read_home_manager');
+/** A Home Manager plan: `build`, `switch`, `activate` (an earlier generation) or `pull` (its repository). */
+export const prepareHomeManager = (action: 'build' | 'switch' | 'activate' | 'pull', generation: number | null = null) =>
+  call<Prepared>('prepare_home_manager', { action, generation });
 export const repository = (path: string) => call<RepositoryView>('read_repository', { path });
 export const repositoryDiff = (path: string, file: string | null, staged: boolean) =>
   call<RepoDiff>('repository_diff', { path, file, staged });

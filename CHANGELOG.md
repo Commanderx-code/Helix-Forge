@@ -35,6 +35,21 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   is as the review showed it. Reading never runs the repository's hooks or
   content filters. Favorites are listed first. `helix-toolbox repos` does
   the same.
+- **Home Manager.** **Home Manager**, in the window and the terminal
+  interface, shows the configuration (named under `[home_manager]` in
+  `settings.toml`, else Command Center's dotfiles, else
+  `~/.config/home-manager`), the generations Home Manager built and which
+  is active, how the configuration's Git repository stands, and which of
+  your configuration files Home Manager links into the Nix store.
+  **Build…**, **Switch…**, going back to an earlier generation through its
+  own `activate` script, and pulling the repository are plans you review.
+  `helix-toolbox home-manager` (`generations`, `build`, `switch`,
+  `activate`, `pull`) does the same.
+- **The timed backup in Settings, and in Recovery.** Settings, in both
+  interfaces, turns the timed restic backup on, every day or every week,
+  and off. Recovery counts a restic repository set up for Helix Toolbox as
+  the backup of your own files, with its newest snapshot when Restic has
+  read them.
 
 ## v1.19.0
 

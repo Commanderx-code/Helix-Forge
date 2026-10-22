@@ -253,6 +253,14 @@ to push. Open one to read its diffs, stage files with `Space`, commit with
 such as `npm run dev` or `cargo test`, are found in its files, and `n` adds
 a command of your own; `Enter` runs one in the project's folder.
 
+## Home Manager
+
+**Home Manager** shows which generation is active and which of your
+configuration files it links, so you know to change those in the
+configuration. `b` builds it first to see that it builds, `s` switches,
+and when a switch went wrong, `Enter` on the generation before it goes
+back. Settings also turns the timed restic backup on and off.
+
 ## A machine without internet
 
 On a machine of the same distribution that is online, `helix-toolbox bundle

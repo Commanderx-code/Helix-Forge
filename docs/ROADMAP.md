@@ -68,6 +68,9 @@ The items:
 - [x] Project workspaces: tasks found in `package.json`, Cargo, Makefiles
       and justfiles without running them, your own kept with favorites in
       `workspaces.toml`, each run in its folder after review
+- [x] Home Manager: the configuration, its generations and the active one,
+      its repository and the files it links; build, switch, going back to
+      a generation and pulling the repository as reviewed plans
 
 ## v1.19.0: moving machines
 

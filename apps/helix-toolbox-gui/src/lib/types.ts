@@ -264,6 +264,10 @@ export type SettingsView = {
   drift: string | null;
   /** The saved baselines: file name and name. */
   baselines: [string, string][];
+  /** How often the timed restic backup runs, or null when it is off. */
+  restic_timer: 'day' | 'week' | null;
+  /** Whether a restic repository is set up, so the timer can be. */
+  restic_ready: boolean;
 };
 
 // Services and startup
@@ -492,6 +496,29 @@ export type RepoSummary = {
 };
 
 export type ReposView = { roots: string[]; depth: number; origin: string; repositories: RepoSummary[] };
+
+// Home Manager
+
+/** One generation Home Manager built. */
+export type HomeGeneration = { id: number; built: string; path: string; current: boolean };
+
+/** A configuration file, and whether Home Manager links it into the Nix store. */
+export type HomeLink = { name: string; path: string; target: string | null; managed: boolean };
+
+/** Home Manager, as `helix-toolbox home-manager --json`. */
+export type HomeManagerView = {
+  installed: boolean;
+  version: string | null;
+  config: { folder: string; flake: boolean; profile: string | null; origin: string } | null;
+  problem: string | null;
+  generations: HomeGeneration[];
+  repository: Omit<RepoSummary, 'favorite' | 'group'> | null;
+  links: HomeLink[];
+  /** The `--flake` reference built, for a flake. */
+  reference: string | null;
+  /** Where the configuration was named. */
+  origin: string | null;
+};
 
 export type RepoFile = { path: string; original: string | null; state: string; staged: boolean; unstaged: boolean; conflict: boolean };
 

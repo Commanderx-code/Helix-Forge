@@ -110,6 +110,18 @@ pub struct Facts<'a> {
     pub is_file: &'a dyn Fn(&Path) -> bool,
 }
 
+/// The repository set up here, for the recovery checks: its name only,
+/// since listing its snapshots may ask for a password.
+pub fn repository_here() -> Option<crate::recovery::Repository> {
+    match here() {
+        Found::Ready(config) => Some(crate::recovery::Repository {
+            name: config.repository,
+            newest: None,
+        }),
+        _ => None,
+    }
+}
+
 /// Where Command Center kept its settings.
 pub fn command_center_settings() -> Option<PathBuf> {
     let base = env::var_os("XDG_CONFIG_HOME")

@@ -24,6 +24,7 @@ export type Screen =
   | { kind: 'migration' }
   | { kind: 'restic' }
   | { kind: 'repositories' }
+  | { kind: 'home-manager' }
   | { kind: 'hardware' }
   | { kind: 'bundles' }
   | { kind: 'desktop' }

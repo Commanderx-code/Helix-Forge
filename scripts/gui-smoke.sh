@@ -106,6 +106,21 @@ printf 'hello\n' > "$work/home/notes.txt"
 unset RESTIC_PASSWORD RESTIC_PASSWORD_FILE RESTIC_PASSWORD_COMMAND
 export RESTIC_REPOSITORY="$work/repository" RESTIC_WALLET=smoke \
     RESTIC_WALLET_ENTRY=restic RESTIC_WALLET_FOLDER=Passwords
+# A stand-in home-manager for the Home Manager screen, with a flake where
+# Home Manager looks by itself: two generations, the earlier one not in
+# this machine's store; builds and switches are only reviewed.
+cat > "$work/bin/home-manager" <<EOF
+#!/bin/sh
+echo "\$*" >> "$work/home-manager.log"
+case "\$1" in
+    --version) echo 26.11-pre ;;
+    generations) printf '%s\n' '2026-10-20 12:01 : id 201 -> /nix/store/aaa-home-manager-generation (current)' \
+        '2026-10-16 13:23 : id 200 -> /nix/store/no-such-home-manager-generation' ;;
+esac
+EOF
+chmod +x "$work/bin/home-manager"
+mkdir -p "$work/home/.config/home-manager"
+printf '{ }\n' > "$work/home/.config/home-manager/flake.nix"
 # The marker fixture writes here, which shows the run really ran.
 export HELIX_TOOLBOX_TEST_OUT="$work/marker.txt"
 # WebKitGTK on a virtual display: no GPU, no compositor.
@@ -186,6 +201,11 @@ if ! grep -qx -- '--user restart helix-toolbox-restic.timer' "$work/systemctl.lo
 fi
 if grep -E ' (backup|restore [0-9a-f]|dump|check)( |$)' "$work/restic.log"; then
     echo "restic was asked to change something" >&2
+    exit 1
+fi
+# Home Manager was only asked to read.
+if grep -E "^(build|switch)" "$work/home-manager.log" 2>/dev/null; then
+    echo "home-manager was asked to build or switch" >&2
     exit 1
 fi
 # The hardware report's issue went to the browser, filled in.

@@ -5,6 +5,7 @@ mod analyze;
 mod bundle;
 mod docgen;
 mod drift;
+mod home;
 mod inspect;
 mod json;
 mod logging;
@@ -286,6 +287,14 @@ enum Command {
     Restic {
         #[command(subcommand)]
         action: Option<restic::ResticCommand>,
+    },
+    /// Home Manager: the configuration, its generations and which is
+    /// active, its Git repository, and the files it links. Reading changes
+    /// nothing; building, switching, going back to a generation and
+    /// pulling the repository are plans, confirmed first.
+    HomeManager {
+        #[command(subcommand)]
+        action: Option<home::HomeManagerCommand>,
     },
     /// The Git repositories under your project folders: their branch,
     /// changes and upstream, one repository's files, diffs, branches and
@@ -1001,6 +1010,9 @@ fn main() -> Result<()> {
         Command::Migrate { action } => migrate::migrate(action, &load(false)?, &platform, as_json),
         Command::Restic { action } => restic::restic(action, &load(false)?, &platform, as_json),
         Command::Repos { action } => repos::repos(action, &load(false)?, &platform, as_json),
+        Command::HomeManager { action } => {
+            home::home_manager(action, &load(false)?, &platform, as_json)
+        }
         Command::Hardware {
             smart,
             firmware,

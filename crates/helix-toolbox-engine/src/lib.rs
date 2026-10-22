@@ -23,6 +23,7 @@ pub mod execution;
 pub mod hardware;
 pub mod hardware_report;
 pub mod history;
+pub mod home_manager;
 pub mod inventory;
 pub mod legacy;
 pub mod migration;

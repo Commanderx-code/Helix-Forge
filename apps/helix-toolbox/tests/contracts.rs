@@ -100,7 +100,7 @@ fn json_shapes_only_gain_fields() {
     let directory = root().join("tests/contracts/json");
     let migration = root().join("tests/contracts/files/migration-1.19.toml");
     let migration = migration.to_str().unwrap();
-    let commands: [(&str, &[&str]); 20] = [
+    let commands: [(&str, &[&str]); 22] = [
         ("system", &["system"]),
         ("list", &["list"]),
         ("search", &["search", "marker"]),
@@ -121,7 +121,13 @@ fn json_shapes_only_gain_fields() {
         ("migration", &["migrate", "show", migration]),
         ("restic", &["restic"]),
         ("restic-baselines", &["restic", "baseline"]),
+        ("home-manager", &["home-manager"]),
+        ("home-manager-generations", &["home-manager", "generations"]),
     ];
+    // A Home Manager configuration where Home Manager looks by itself, so
+    // its shape is in the saved one.
+    fs::create_dir_all(home.path().join(".config/home-manager")).unwrap();
+    fs::write(home.path().join(".config/home-manager/flake.nix"), "{ }\n").unwrap();
     let mut problems = Vec::new();
     for (name, args) in commands {
         let now = shape(&json(home.path(), args));

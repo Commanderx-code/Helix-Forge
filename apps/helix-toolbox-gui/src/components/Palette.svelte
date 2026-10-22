@@ -50,6 +50,7 @@
     { screen: { kind: 'migration' }, label: 'Migration' },
     { screen: { kind: 'restic' }, label: 'Restic' },
     { screen: { kind: 'repositories' }, label: 'Repositories' },
+    { screen: { kind: 'home-manager' }, label: 'Home Manager' },
     { screen: { kind: 'bundles' }, label: 'Offline bundles' },
     { screen: { kind: 'desktop' }, label: 'Desktop' },
     { screen: { kind: 'settings' }, label: 'Settings' },

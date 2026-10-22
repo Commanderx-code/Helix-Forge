@@ -195,7 +195,7 @@
     await until('the focus back on Marker', () => document.activeElement === marker);
   });
 
-  const screens = ['Updates','Backups', 'Drift', 'Reliability', 'Hardware', 'Services', 'Storage', 'Performance', 'Recovery', 'Migration', 'Restic', 'Repositories', 'Desktop', 'History', 'Favorites', 'Dashboard'];
+  const screens = ['Updates','Backups', 'Drift', 'Reliability', 'Hardware', 'Services', 'Storage', 'Performance', 'Recovery', 'Migration', 'Restic', 'Repositories', 'Home Manager', 'Desktop', 'History', 'Favorites', 'Dashboard'];
   for (const name of screens) {
     await step(`the ${name} screen opens`, async () => {
       await click(name, document.querySelector('nav'));
@@ -481,6 +481,52 @@
     await until('the review to close', () => !document.querySelector('#confirm-title'));
     await click('All repositories');
     return 'diff shown; a stage and a task reviewed; nothing ran';
+  });
+
+  await step('Home Manager generations are shown, a build and going back reviewed, the timed backup set from Settings, and nothing runs', async () => {
+    await click('Home Manager', document.querySelector('nav'));
+    await until('Home Manager', () => screenTitle().startsWith('Home Manager'));
+    // scripts/gui-smoke.sh's stand-in home-manager lists two generations.
+    const generations = await until('the generations', () => document.querySelector('[aria-label="Generations"]'), 30000);
+    if (!generations.textContent.includes('201') || !generations.textContent.includes('Active')) {
+      throw new Error(`generations: ${generations.textContent.trim()}`);
+    }
+    await accessible('Home Manager');
+    await click('Build…');
+    let review = await until('the review', () => document.querySelector('#confirm-title')?.closest('[role="dialog"]'), 30000);
+    if (!review.textContent.includes('home-manager build --flake')) throw new Error(review.textContent);
+    await accessible('a build under review');
+    await click(button('Cancel', review) ? 'Cancel' : 'OK', review);
+    await until('the review to close', () => !document.querySelector('#confirm-title'));
+    // The earlier generation is not in this machine's Nix store: going
+    // back to it says so instead of planning.
+    await click('Go back to it…', generations);
+    review = await until('what going back says', () => document.querySelector('#confirm-title')?.closest('[role="dialog"]'), 30000);
+    if (!review.textContent.includes('no activate script')) throw new Error(review.textContent);
+    await click(button('Cancel', review) ? 'Cancel' : 'OK', review);
+    await until('it to close', () => !document.querySelector('#confirm-title'));
+    // Settings turns the timed restic backup on, every day, and off again.
+    await click('Settings', document.querySelector('nav'));
+    await until('Settings', () => screenTitle().startsWith('Settings'));
+    const choose = async (value) => {
+      const timer = await until('the backup timer', () => {
+        const found = document.querySelector('#restic-timer');
+        return found && !found.disabled && found;
+      });
+      timer.value = value;
+      timer.dispatchEvent(new Event('change', { bubbles: true }));
+      const told = await until('what the timer did', () => document.querySelector('#notice-title')?.closest('[role="dialog"]'));
+      await click('OK', told);
+      return told.textContent;
+    };
+    const on = await choose('day');
+    if (!on.includes('every day')) throw new Error(on);
+    if ((await invoke('read_settings')).restic_timer !== 'day') throw new Error('the timed backup is not on');
+    await accessible('Settings with the timed backup on');
+    const off = await choose('');
+    if (!off.includes('off')) throw new Error(off);
+    if ((await invoke('read_settings')).restic_timer !== null) throw new Error('the timed backup is not off');
+    return 'two generations; a build and going back reviewed; the timed backup on and off from Settings; nothing ran';
   });
 
   await step('an entry is checked now, without changing anything', async () => {

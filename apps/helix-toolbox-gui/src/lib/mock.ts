@@ -1,7 +1,7 @@
 // Sample answers for working on the interface in a browser, where there is
 // no Tauri side. Nothing here reads or changes the machine.
 
-import type { AreaView, ChangesView, EntryView, ItemView, Migration, MigrationExportView, PerformanceView, Prepared, RecordView, RecoveryView, RepositoryView, ReposView, ResticView, ResticNode, ResticHistory, RunEvent, TranslationView, ServicesView, StatusView, StorageView, WindowTheme } from './types';
+import type { AreaView, ChangesView, EntryView, HomeManagerView, ItemView, Migration, MigrationExportView, PerformanceView, Prepared, RecordView, RecoveryView, RepositoryView, ReposView, ResticView, ResticNode, ResticHistory, RunEvent, TranslationView, ServicesView, StatusView, StorageView, WindowTheme } from './types';
 
 const entry = (id: string, name: string, description: string, flags = 'I', extra: Partial<EntryView> = {}): ItemView => ({
   type: 'entry',
@@ -644,6 +644,32 @@ export async function call(command: string, args: Record<string, unknown> = {}):
       return { id: '1792600000001', path: String(args.path), sha256: '5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03', recorded: 1_792_600_001 };
     case 'set_restic_timer':
       return args.on ? 'The backup runs every day.' : 'The timed backup is off.';
+    case 'read_home_manager':
+      return {
+        installed: true,
+        version: '26.11-pre',
+        config: { folder: '/home/me/dotfiles/home-manager', flake: true, profile: 'me', origin: 'settings' },
+        problem: null,
+        generations: [
+          { id: 201, built: '2026-10-20 12:01', path: '/nix/store/aaa-home-manager-generation', current: true },
+          { id: 200, built: '2026-10-16 13:23', path: '/nix/store/bbb-home-manager-generation', current: false },
+        ],
+        repository: { name: 'dotfiles', path: '/home/me/dotfiles', branch: 'main', changed: 0, upstream: 'origin/main', ahead: 0, behind: 2, last: 'Ghostty: a smaller font', last_at: 1_792_400_000, origin: 'git@github.com:me/dotfiles.git', problem: null },
+        links: [
+          { name: 'Ghostty', path: '/home/me/.config/ghostty/config', target: '/nix/store/xyz-home-manager-files/.config/ghostty/config', managed: true },
+          { name: 'Fastfetch', path: '/home/me/.config/fastfetch/config.jsonc', target: null, managed: false },
+        ],
+        reference: '/home/me/dotfiles/home-manager#me',
+        origin: "Helix Toolbox's settings",
+      } satisfies HomeManagerView;
+    case 'prepare_home_manager':
+      return {
+        kind: 'ready',
+        risk: args.action === 'build' ? 'low' : 'medium',
+        privileged: false,
+        header: [`Risk: ${args.action === 'build' ? 'low' : 'medium'}`],
+        lines: [{ name: 'Switch to the Home Manager configuration', detail: "home-manager switch --flake '/home/me/dotfiles/home-manager#me'" }],
+      } satisfies Prepared;
     case 'prepare_snapshot_check':
       return {
         kind: 'ready',
@@ -675,7 +701,7 @@ export async function call(command: string, args: Record<string, unknown> = {}):
         : 'Notifications are off.';
     case 'read_settings':
     case 'save_settings':
-      return { keep_going: args.keepGoing ?? false, snapshots: args.snapshots ?? true, snapshot_tool: 'Snapper', path: '/home/me/.config/helix-toolbox/settings.toml', theme, notifications, health, drift: watched, baselines: [['fresh-install', 'Fresh install']] };
+      return { keep_going: args.keepGoing ?? false, snapshots: args.snapshots ?? true, snapshot_tool: 'Snapper', path: '/home/me/.config/helix-toolbox/settings.toml', theme, notifications, health, drift: watched, baselines: [['fresh-install', 'Fresh install']], restic_timer: null, restic_ready: true };
     default:
       return undefined;
   }
