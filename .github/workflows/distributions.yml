@@ -550,6 +550,25 @@ jobs:
           bin/helix-toolbox notifications off
           test ! -e $units/helix-toolbox-updates.timer
           test ! -e $units/timers.target.wants/helix-toolbox-updates.timer
+      - name: Services and storage, read and one cleanup run for real
+        run: |
+          # No systemd runs in a container: the services list says so and stops.
+          if bin/helix-toolbox services > services.txt 2>&1; then
+            echo "the services list ran without systemd" >&2
+            exit 1
+          fi
+          grep -q 'systemd does not run this machine' services.txt
+          bin/helix-toolbox startup
+          bin/helix-toolbox --json storage > storage.json
+          python3 -c 'import json, sys
+          data = json.load(open("storage.json"))["data"]
+          ids = [item["id"] for item in data["items"]]
+          assert "package-cache" in ids and "unused-packages" in ids, ids
+          assert not any(name.startswith(("linux", "kernel")) for item in data["items"] for name in item["packages"]), data'
+          bin/helix-toolbox storage clean package-cache --dry-run | tee clean.txt
+          grep -q '^1\. Clean: Package cache$' clean.txt
+          bin/helix-toolbox storage clean package-cache --yes
+          bin/helix-toolbox storage
       - name: Script and native entries
         run: |
           bin/helix-toolbox run system-report machine-summary --yes | tee report.txt
