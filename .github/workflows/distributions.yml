@@ -565,9 +565,21 @@ jobs:
           ids = [item["id"] for item in data["items"]]
           assert "package-cache" in ids and "unused-packages" in ids, ids
           assert not any(name.startswith(("linux", "kernel")) for item in data["items"] for name in item["packages"]), data'
-          bin/helix-toolbox storage clean package-cache --dry-run | tee clean.txt
-          grep -q '^1\. Clean: Package cache$' clean.txt
-          bin/helix-toolbox storage clean package-cache --yes
+          # Images often keep no package cache: then it is not offered, and says why.
+          offered=$(python3 -c 'import json
+          items = json.load(open("storage.json"))["data"]["items"]
+          print(next(item for item in items if item["id"] == "package-cache")["not_offered"] is None)')
+          if [ "$offered" = True ]; then
+            bin/helix-toolbox storage clean package-cache --dry-run | tee clean.txt
+            grep -q '^1\. Clean: Package cache$' clean.txt
+            bin/helix-toolbox storage clean package-cache --yes
+          else
+            if bin/helix-toolbox storage clean package-cache --yes 2> refused.txt; then
+              echo "an empty package cache was cleaned" >&2
+              exit 1
+            fi
+            grep -q 'Package cache is not offered' refused.txt
+          fi
           bin/helix-toolbox storage
       - name: Script and native entries
         run: |
