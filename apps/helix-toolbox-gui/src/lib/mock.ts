@@ -1,7 +1,7 @@
 // Sample answers for working on the interface in a browser, where there is
 // no Tauri side. Nothing here reads or changes the machine.
 
-import type { AreaView, ChangesView, EntryView, HomeManagerView, ItemView, Migration, MigrationExportView, PerformanceView, Prepared, RecordView, RecoveryView, RepositoryView, ReposView, ResticView, ResticNode, ResticHistory, RunEvent, TranslationView, ServicesView, StatusView, StorageView, WindowTheme } from './types';
+import type { AreaView, ChangesView, ConfigView, EntryView, HomeManagerView, ItemView, Migration, MigrationExportView, PerformanceView, Prepared, RecordView, RecoveryView, RepositoryView, ReposView, ResticView, ResticNode, ResticHistory, RunEvent, TranslationView, ServicesView, StatusView, StorageView, WindowTheme } from './types';
 
 const entry = (id: string, name: string, description: string, flags = 'I', extra: Partial<EntryView> = {}): ItemView => ({
   type: 'entry',
@@ -597,6 +597,62 @@ export async function call(command: string, args: Record<string, unknown> = {}):
           { name: 'com.spotify.Client', detail: 'sudo flatpak install flathub com.spotify.Client' },
           { name: 'htop', detail: 'sudo pacman -S --needed htop' },
         ],
+      } satisfies Prepared;
+    case 'read_configs':
+      return [
+        {
+          kind: 'ghostty',
+          label: 'Ghostty',
+          problem: null,
+          path: '/home/me/.config/ghostty/config',
+          live: '/home/me/.config/ghostty/config',
+          origin: 'the live file',
+          managed: false,
+          flake: null,
+          exists: true,
+          revision: '5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03',
+          content: 'font-family = JetBrains Mono\nfont-size = 12\ntheme = catppuccin-mocha\n',
+          checked: { state: 'valid' },
+          fields: [
+            { key: 'font-family', label: 'Font', hint: 'a font name', value: 'JetBrains Mono' },
+            { key: 'font-size', label: 'Font size', hint: 'points, such as 12', value: '12' },
+            { key: 'theme', label: 'Theme', hint: 'a theme name', value: 'catppuccin-mocha' },
+          ],
+          backups: [{ backup: '/home/me/.config/ghostty/config.helix-toolbox-backup-20261021220004-4120', taken: '2026-10-21 22:00:04' }],
+        },
+        {
+          kind: 'fastfetch',
+          label: 'Fastfetch',
+          problem: null,
+          path: '/home/me/dotfiles/configs/fastfetch/config.jsonc',
+          live: '/home/me/.config/fastfetch/config.jsonc',
+          origin: 'your dotfiles',
+          managed: true,
+          flake: '/home/me/dotfiles',
+          exists: true,
+          revision: '2ed6a3a00460219dd6d364e9556828467b0f39d52508d70f3dad19688ef8f9d0',
+          content: '{\n    "logo": { "source": "arch" },\n    "modules": ["title", "os", "memory"]\n}\n',
+          checked: { state: 'valid' },
+          fields: [
+            { key: 'logo.source', label: 'Logo', hint: 'a distribution name or a file', value: 'arch' },
+            { key: 'logo.type', label: 'Logo type', hint: 'auto, small, kitty…', value: null },
+            { key: 'modules', label: 'Modules', hint: 'their names in order', value: 'title, os, memory' },
+          ],
+          backups: [],
+        },
+      ] satisfies ConfigView[];
+    case 'validate_config':
+      return String(args.text).includes('bogus') ? { state: 'invalid', message: 'Ghostty rejected it: unknown field bogus' } : { state: 'valid' };
+    case 'set_config_field':
+      return { content: `${String(args.text).trimEnd()}\n${String(args.key)} = ${String(args.value)}\n`, fields: [] };
+    case 'prepare_config_save':
+    case 'prepare_config_restore':
+      return {
+        kind: 'ready',
+        risk: 'low',
+        privileged: false,
+        header: ['Risk: low'],
+        lines: [{ name: "Save Ghostty's configuration", detail: 'the new text written over /home/me/.config/ghostty/config (the current one kept as a backup first)' }],
       } satisfies Prepared;
     case 'read_restic':
       return {

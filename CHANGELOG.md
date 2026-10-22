@@ -35,6 +35,20 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   is as the review showed it. Reading never runs the repository's hooks or
   content filters. Favorites are listed first. `helix-toolbox repos` does
   the same.
+- **Configs.** **Configs**, in the window and the terminal interface,
+  edits Ghostty's and Fastfetch's configuration: the file that is really
+  the one to change (named under `[configs]` in `settings.toml`, the one
+  Command Center was set up with, or, where Home Manager links the live
+  file into the Nix store, its source in your dotfiles), whether it checks
+  (Ghostty's own `+validate-config`; Fastfetch's JSONC read here), a few
+  common fields such as the font, the theme, the logo and the modules,
+  changed without touching the rest, comments included, and the whole file
+  in the window or your editor. Saving is a plan you review, with the file
+  side by side: it refuses a file that changed since it was read, keeps the
+  one there as a configuration backup beside it, which **Backups** and
+  `helix-toolbox restore` can put back, and says when Home Manager must
+  run to make it live. `helix-toolbox config` (`ghostty`, `fastfetch`;
+  `validate`, `set`, `edit`, `history`) does the same.
 - **Home Manager.** **Home Manager**, in the window and the terminal
   interface, shows the configuration (named under `[home_manager]` in
   `settings.toml`, else Command Center's dotfiles, else

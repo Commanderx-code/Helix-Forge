@@ -270,7 +270,7 @@ pub fn parse_generations(text: &str, current: Option<&Path>) -> Vec<Generation> 
                 None => (rest.trim(), false),
             };
             let path = PathBuf::from(path);
-            if !path.starts_with("/nix/store/") {
+            if !store_path(&path) {
                 return None;
             }
             Some(Generation {
@@ -472,7 +472,12 @@ pub fn plan_activate(system: &dyn System, generation: &Generation) -> Result<Pla
         return Err(format!("generation {} is the active one", generation.id));
     }
     let activate = generation.path.join("activate");
-    if !generation.path.starts_with("/nix/store/") || !system.exists(&activate) {
+    // Where the script really is must be in the store too: a link out of
+    // it would run something Home Manager did not build.
+    let escapes = system
+        .canonical(&activate)
+        .is_some_and(|real| !real.starts_with("/nix/store"));
+    if !store_path(&generation.path) || escapes || !system.exists(&activate) {
         return Err(format!(
             "generation {} has no activate script at {}; it may have been collected",
             generation.id,
@@ -498,6 +503,18 @@ pub fn plan_activate(system: &dyn System, generation: &Generation) -> Result<Pla
         depends: vec![Vec::new()],
         ..Plan::default()
     })
+}
+
+/// A path of the Nix store itself, `/nix/store/<name>`: no `..` or `.` in
+/// it and nothing below the store path, so it cannot point elsewhere.
+fn store_path(path: &Path) -> bool {
+    use std::path::Component;
+    let parts: Vec<Component> = path.components().collect();
+    matches!(
+        parts.as_slice(),
+        [Component::RootDir, Component::Normal(nix), Component::Normal(store), Component::Normal(name)]
+            if *nix == "nix" && *store == "store" && !name.to_string_lossy().starts_with('.')
+    ) && !path.to_string_lossy().contains("/./")
 }
 
 /// A generation by its id.
@@ -670,6 +687,24 @@ mod tests {
         let found = parse_generations(GENERATIONS, None);
         assert!(plan_activate(&fake, &found[0]).is_err(), "the active one");
         assert!(plan_activate(&fake, &found[1]).is_err(), "collected");
+        // A path that only starts like the store's is no generation.
+        for path in [
+            "/nix/store/../../tmp/evil",
+            "/nix/store/abc-generation/../../../tmp",
+            "/nix/store/./abc",
+            "/nix/storefront/abc",
+            "/nix/store",
+        ] {
+            assert!(!store_path(Path::new(path)), "{path}");
+        }
+        assert!(store_path(Path::new(
+            "/nix/store/abc-home-manager-generation"
+        )));
+        let tricked = parse_generations(
+            "2026-10-20 12:01 : id 9 -> /nix/store/../../tmp/evil\n",
+            None,
+        );
+        assert!(tricked.is_empty());
         fake.files.insert(
             "/nix/store/bbb-home-manager-generation/activate".into(),
             String::new(),

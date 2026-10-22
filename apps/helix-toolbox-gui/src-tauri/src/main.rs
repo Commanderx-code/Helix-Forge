@@ -9,7 +9,7 @@ mod views;
 use helix_toolbox_catalog::Catalog;
 use helix_toolbox_core::{Action, Entry, printable};
 use helix_toolbox_engine::{
-    Plan, backups, bundle,
+    Plan, backups, bundle, configs,
     confirmation::{self, Prepared},
     desktop, doctor, drift,
     execution::{Execution, Options},
@@ -1800,6 +1800,238 @@ async fn set_restic_timer(app: AppHandle, on: bool, weekly: bool) -> Result<Stri
     .await?
 }
 
+// Configs
+
+/// A field of a configuration, with its value now.
+#[derive(Serialize)]
+struct ConfigFieldView {
+    key: &'static str,
+    label: &'static str,
+    hint: &'static str,
+    value: Option<String>,
+}
+
+/// A backup kept beside a configuration.
+#[derive(Serialize)]
+struct ConfigBackupView {
+    backup: PathBuf,
+    taken: Option<String>,
+}
+
+/// One configuration as `helix-toolbox config <program> --json` shows it,
+/// with its text to edit.
+#[derive(Serialize)]
+struct ConfigView {
+    kind: configs::Kind,
+    label: &'static str,
+    /// Why it cannot be edited, when it cannot.
+    problem: Option<String>,
+    path: Option<PathBuf>,
+    live: Option<PathBuf>,
+    origin: Option<&'static str>,
+    managed: bool,
+    flake: Option<PathBuf>,
+    exists: bool,
+    revision: Option<String>,
+    content: String,
+    checked: Option<configs::Checked>,
+    fields: Vec<ConfigFieldView>,
+    backups: Vec<ConfigBackupView>,
+}
+
+/// Helix Toolbox's private folder for copies of configurations; never a
+/// shared one.
+fn copies_folder() -> Result<PathBuf, String> {
+    configs::private_folder().ok_or_else(|| {
+        "There is no state folder for Helix Toolbox's private copies; nothing is saved.".to_string()
+    })
+}
+
+fn config_kind(kind: &str) -> Result<configs::Kind, String> {
+    configs::Kind::from_id(kind)
+        .ok_or_else(|| format!("{} is not a configuration here", printable(kind)))
+}
+
+fn fields_of(kind: configs::Kind, text: &str) -> Vec<ConfigFieldView> {
+    let values = configs::values(kind, text);
+    kind.fields()
+        .iter()
+        .map(|field| ConfigFieldView {
+            key: field.key,
+            label: field.label,
+            hint: field.hint,
+            value: values
+                .iter()
+                .find(|(key, _)| *key == field.key)
+                .and_then(|(_, value)| value.clone()),
+        })
+        .collect()
+}
+
+fn config_view(kind: configs::Kind) -> ConfigView {
+    let mut view = ConfigView {
+        kind,
+        label: kind.label(),
+        problem: None,
+        path: None,
+        live: None,
+        origin: None,
+        managed: false,
+        flake: None,
+        exists: false,
+        revision: None,
+        content: String::new(),
+        checked: None,
+        fields: Vec::new(),
+        backups: Vec::new(),
+    };
+    let located = match configs::here(kind) {
+        Ok(located) => located,
+        Err(why) => {
+            view.problem = Some(why);
+            return view;
+        }
+    };
+    view.path = Some(located.path.clone());
+    view.live = Some(located.live.clone());
+    view.origin = Some(located.origin.label());
+    view.managed = located.managed;
+    view.flake = located.flake.clone();
+    view.backups = configs::history(&located)
+        .into_iter()
+        .map(|backup| ConfigBackupView {
+            backup: backup.backup,
+            taken: backup.taken,
+        })
+        .collect();
+    match configs::read(&located) {
+        Ok(loaded) => {
+            view.checked = Some(configs::validate(
+                kind,
+                &loaded.content,
+                &configs::ghostty_here,
+                copies_folder().ok().as_deref(),
+            ));
+            view.fields = fields_of(kind, &loaded.content);
+            view.exists = loaded.exists;
+            view.revision = Some(loaded.revision);
+            view.content = loaded.content;
+        }
+        Err(why) => view.problem = Some(why),
+    }
+    view
+}
+
+/// Ghostty's and Fastfetch's configuration, as `helix-toolbox config` reads
+/// them.
+#[tauri::command]
+async fn read_configs(app: AppHandle) -> Result<Vec<ConfigView>, String> {
+    blocking(app, |_| {
+        configs::Kind::ALL.into_iter().map(config_view).collect()
+    })
+    .await
+}
+
+/// What the checks say of a draft, before it is saved.
+#[tauri::command]
+async fn validate_config(
+    app: AppHandle,
+    kind: String,
+    text: String,
+) -> Result<configs::Checked, String> {
+    blocking(app, move |_| {
+        let kind = config_kind(&kind)?;
+        Ok(configs::validate(
+            kind,
+            &text,
+            &configs::ghostty_here,
+            copies_folder().ok().as_deref(),
+        ))
+    })
+    .await?
+}
+
+/// A field changed in a draft: the new text and the fields' values, not
+/// saved yet.
+#[derive(Serialize)]
+struct ConfigDraftView {
+    content: String,
+    fields: Vec<ConfigFieldView>,
+}
+
+#[tauri::command]
+fn set_config_field(
+    kind: String,
+    text: String,
+    key: String,
+    value: String,
+) -> Result<ConfigDraftView, String> {
+    let kind = config_kind(&kind)?;
+    let content = configs::set(kind, &text, &key, &value)?;
+    Ok(ConfigDraftView {
+        fields: fields_of(kind, &content),
+        content,
+    })
+}
+
+/// The plan that saves a draft, as `helix-toolbox config` saves one: the
+/// file must be the one read (`path`) and unchanged since (`revision`).
+#[tauri::command]
+async fn prepare_config_save(
+    app: AppHandle,
+    kind: String,
+    path: String,
+    revision: String,
+    text: String,
+) -> Result<PreparedView, String> {
+    blocking(app, move |gui| {
+        let planned = (|| -> Result<Plan, String> {
+            let kind = config_kind(&kind)?;
+            let located = configs::here(kind)?;
+            if located.path != Path::new(&path) {
+                return Err(
+                    "Which file is edited changed since it was read; read it again.".into(),
+                );
+            }
+            let folder = copies_folder()?;
+            let checked = configs::validate(kind, &text, &configs::ghostty_here, Some(&folder));
+            configs::plan_save(&located, &revision, &text, &checked, &folder)
+        })();
+        let catalog = gui.catalog.read().unwrap();
+        match planned {
+            Ok(planned) => prepare_plan(gui, &catalog, planned),
+            Err(why) => cannot(gui, why),
+        }
+    })
+    .await
+}
+
+/// A backup of a configuration put back, the file there now kept too:
+/// only one of the backups kept beside it.
+#[tauri::command]
+async fn prepare_config_restore(
+    app: AppHandle,
+    kind: String,
+    backup: String,
+) -> Result<PreparedView, String> {
+    blocking(app, move |gui| {
+        let planned = (|| -> Result<Plan, String> {
+            let located = configs::here(config_kind(&kind)?)?;
+            let found = configs::history(&located)
+                .into_iter()
+                .find(|kept| kept.backup == Path::new(&backup))
+                .ok_or("That backup is not kept beside the file.")?;
+            Ok(backups::plan_restore(&found))
+        })();
+        let catalog = gui.catalog.read().unwrap();
+        match planned {
+            Ok(planned) => prepare_plan(gui, &catalog, planned),
+            Err(why) => cannot(gui, why),
+        }
+    })
+    .await
+}
+
 // Repositories
 
 /// The repositories found, as `helix-toolbox repos --json` lists them.
@@ -2804,6 +3036,8 @@ fn main() {
                 read_repositories, read_repository, repository_diff, prepare_repository_change,
                 read_home_manager, prepare_home_manager,
                 prepare_task, save_workspace,
+                read_configs, validate_config, set_config_field, prepare_config_save,
+                prepare_config_restore,
                 drift_check, save_baseline, reliability, trust, read_hardware, prepare_firmware,
                 prepare_smart, read_desktop, save_look, prepare_look, read_settings,
                 save_settings, save_watch, save_theme, bundle_contents, prepare_bundle_create,

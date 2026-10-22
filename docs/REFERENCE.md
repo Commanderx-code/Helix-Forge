@@ -602,6 +602,45 @@ repository by its name, or its path when names repeat; changes with
 `--dry-run` and `--yes`, confirmed by typing GIT, a task by typing TASK)
 does the same.
 
+## Configs
+
+**Configs** edits Ghostty's and Fastfetch's configuration. The file edited
+is the one `[configs]` in `settings.toml` names (`ghostty_source`,
+`fastfetch_source`, absolute or under `~/`), else the one Command Center
+was set up with, read only, else the live file (`ghostty/config`, or
+`config.ghostty` where Ghostty 1.2 reads it, and `fastfetch/config.jsonc`
+in the configuration folder). Where Home Manager links the live file into
+the Nix store, it is never edited there: its source in your dotfiles
+(`configs/ghostty/config` or `configs/fastfetch/config.jsonc` under
+`~/dotfiles`, `~/github/projects/dotfiles` or the dotfiles Command Center
+named) is, and when that file is part of a Home Manager flake, you are
+told to run Home Manager afterward. A file is only edited when it is a
+full path without `..`, not in the Nix store, inside your home or
+configuration folder, and 512 KB at most.
+
+The checks: Ghostty's own `ghostty +validate-config` of a copy, in Helix
+Toolbox's private folder beside the history (never a shared one, a link or
+another user's), or, without Ghostty, said not to be checked; Fastfetch's
+JSONC read here, comments and trailing commas allowed: one object, and
+`modules` a list of names or objects with a `"type"`.
+
+`Enter` on a field changes it: Ghostty's font (the first `font-family`;
+the others stay as fallbacks), font size, theme, padding, background
+opacity and cursor, the last line that sets each; Fastfetch's logo, its
+type and the modules, in order, each kept with its options. The rest of
+the file, comments included, is left as it is. `E` opens a private copy in
+`$VISUAL` or `$EDITOR`, then checks it. Either way the save is a plan you
+review, the file side by side: run, it checks with `sha256sum` that the
+file is as it was read, keeps it as a configuration backup beside it
+(`<file>.helix-toolbox-backup-<time>`) and writes the new text, keeping the
+file's permissions. Text that does not check is not saved. `Enter` on a
+backup puts it back, the file there now kept as a backup first, as
+**Backups** and `helix-toolbox restore` do; `d` shows where the file is and
+its SHA-256, `r` reads both again. `helix-toolbox config <ghostty |
+fastfetch>` (`validate [file]`, `set <field> <value>`, `edit`, `history`;
+saving with `--dry-run` and `--yes`, confirmed by typing SAVE) does the
+same.
+
 ## Home Manager
 
 **Home Manager** shows the configuration Home Manager builds: the folder
@@ -749,6 +788,7 @@ helix-toolbox migrate export [file]      # what this machine has, to take to ano
 helix-toolbox migrate show <file>        # what a migration means here; migrate apply installs it
 helix-toolbox restic                     # the repository and its snapshots; history, restore, test
 helix-toolbox repos                      # the Git repositories under your project folders
+helix-toolbox config ghostty             # the file edited, its checks and fields; set, edit, history
 helix-toolbox repos show <repo>          # its changes, branches, stashes, commits and tasks; stage, commit, push...
 helix-toolbox home-manager               # its configuration and generations; build, switch, activate, pull
 helix-toolbox reliability --critical     # how far the boot, login and driver entries are tested

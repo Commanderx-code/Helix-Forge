@@ -15,6 +15,7 @@
 
 pub mod backups;
 pub mod bundle;
+pub mod configs;
 pub mod confirmation;
 pub mod desktop;
 pub mod doctor;

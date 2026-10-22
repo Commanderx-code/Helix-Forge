@@ -347,6 +347,22 @@ tasks` is `tasks`: `{repository, tasks}`.
 `repos diff <repo> [file]`: `{text, truncated}`, the patch as git prints
 it (an untracked file as its lines), `truncated` when it was cut short.
 
+## config
+
+`config <ghostty | fastfetch>`: `{kind, problem, path, live, origin,
+managed, flake, exists, revision, checked, values, backups}`. `problem`
+says why the file cannot be edited (then the rest is `null` or empty);
+`path` is the file edited, `live` where the program reads it, `origin`
+`settings`, `command-center`, `dotfiles` or `live`, `managed` whether the
+live file is a Home Manager link, `flake` the Home Manager flake it is part
+of or `null`. `revision` is the file's SHA-256, or `absent`. `checked` is
+`{state, message}`, `state` `valid`, `unchecked` or `invalid` and `message`
+there unless it is valid. `values` are `[{key, label, hint, value}]`
+(`value` `null` when not set); `backups` are `[{backup, taken}]`, newest
+first. `config <program> history` is `config-history`: `{kind, path,
+backups}`; `config <program> validate` is `config-validate`: `{kind,
+checked}`.
+
 ## home-manager
 
 `home-manager`: `{installed, version, config, problem, generations,

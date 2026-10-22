@@ -709,6 +709,66 @@ jobs:
             fi
             grep -q 'restic 0.17 or later' refused.txt
           fi
+      - name: Fastfetch and Ghostty configurations changed, saved with a backup and put back, for real
+        run: |
+          mkdir -p "$HOME/.config/fastfetch" "$HOME/.config/ghostty" hf-bin
+          printf '{\n    // mine\n    "logo": { "source": "arch" },\n    "modules": ["title", "os"]\n}\n' > "$HOME/.config/fastfetch/config.jsonc"
+          bin/helix-toolbox --json config fastfetch > fastfetch.json
+          python3 -c 'import json
+          d = json.load(open("fastfetch.json"))["data"]
+          assert d["origin"] == "live" and d["checked"]["state"] == "valid", d
+          assert [field["value"] for field in d["values"]] == ["arch", None, "title, os"], d["values"]'
+          # A field changed: the comment and the rest stay, the one before is kept.
+          bin/helix-toolbox config fastfetch set modules "os, kernel, title" --yes | tee saved.txt
+          grep -q '^Helix Toolbox: the previous one is kept as ' saved.txt
+          grep -q '"kernel"' "$HOME/.config/fastfetch/config.jsonc"
+          grep -q '// mine' "$HOME/.config/fastfetch/config.jsonc"
+          bin/helix-toolbox --json config fastfetch history > history.json
+          backup=$(python3 -c 'import json; print(json.load(open("history.json"))["data"]["backups"][0]["backup"])')
+          grep -q '"modules": \["title", "os"\]' "$backup"
+          # An edit through the editor, which here is sed.
+          VISUAL='' EDITOR='sed -i s/kernel/memory/' bin/helix-toolbox config fastfetch edit --yes
+          grep -q '"memory"' "$HOME/.config/fastfetch/config.jsonc"
+          # What does not read as Fastfetch's JSONC is refused, and nothing is written.
+          printf '{ "modules": "os" }\n' > bad.jsonc
+          if bin/helix-toolbox config fastfetch validate bad.jsonc 2> refused.txt; then
+            echo "a configuration that does not check passed" >&2
+            exit 1
+          fi
+          grep -q 'must be a list' refused.txt
+          if VISUAL='' EDITOR='sed -i 1d' bin/helix-toolbox config fastfetch edit --yes 2> refused.txt; then
+            echo "an edit that does not check was saved" >&2
+            exit 1
+          fi
+          grep -q '"memory"' "$HOME/.config/fastfetch/config.jsonc"
+          # The first backup put back; what was there is kept too.
+          bin/helix-toolbox restore "$backup" --yes
+          grep -q '"modules": \["title", "os"\]' "$HOME/.config/fastfetch/config.jsonc"
+          # Ghostty, checked by a stand-in that rejects a bogus field.
+          cat > hf-bin/ghostty <<'EOF'
+          #!/bin/sh
+          if grep -q bogus "${2#--config-file=}"; then
+              echo "unknown field: bogus"
+              exit 1
+          fi
+          EOF
+          chmod +x hf-bin/ghostty
+          printf 'font-family = Iosevka\nfont-family = Noto Color Emoji\nfont-size = 11\n' > "$HOME/.config/ghostty/config"
+          PATH="$PWD/hf-bin:$PATH" bin/helix-toolbox config ghostty set font-size 13 --yes
+          grep -qx 'font-size = 13' "$HOME/.config/ghostty/config"
+          grep -qx 'font-family = Noto Color Emoji' "$HOME/.config/ghostty/config"
+          if PATH="$PWD/hf-bin:$PATH" bin/helix-toolbox config ghostty set theme bogus --yes 2> refused.txt; then
+            echo "a field Ghostty rejects was saved" >&2
+            exit 1
+          fi
+          grep -q 'Ghostty rejected it' refused.txt
+          # Without Ghostty it is saved, and the plan says it was not checked.
+          bin/helix-toolbox config ghostty set font-size 14 --yes | tee saved.txt
+          if ! command -v ghostty > /dev/null; then
+            grep -q '^Warning: Ghostty is not installed here' saved.txt
+          fi
+          grep -qx 'font-size = 14' "$HOME/.config/ghostty/config"
+          test "$(bin/helix-toolbox --json config ghostty history | python3 -c 'import json, sys; print(len(json.load(sys.stdin)["data"]["backups"]))')" = 2
       - name: Script and native entries
         run: |
           bin/helix-toolbox run system-report machine-summary --yes | tee report.txt

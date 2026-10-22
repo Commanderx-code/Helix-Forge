@@ -88,6 +88,9 @@ settings, profiles and history over ([what changed](https://github.com/Commander
   another machine or distribution: catalog entries become that
   distribution's packages, Flatpaks come from Flathub, and the packages
   that do not translate are listed for you.
+- **Configs**: Ghostty's and Fastfetch's configuration, in its Home
+  Manager source when it has one: a few common fields or the whole file,
+  checked, shown side by side and kept as a backup before each save.
 - **Restic backups**: the snapshots of your own files, a file's history
   across them, restores into a new folder that overwrite nothing, backups
   on a timer, and recovery tests that restore a file and compare its

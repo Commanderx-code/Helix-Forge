@@ -52,6 +52,7 @@
   {@render item({ kind: 'restic' }, 'archive', 'Restic')}
   {@render item({ kind: 'repositories' }, 'branch', 'Repositories')}
   {@render item({ kind: 'home-manager' }, 'home', 'Home Manager')}
+  {@render item({ kind: 'configs' }, 'sliders', 'Configs')}
   {@render item({ kind: 'bundles' }, 'package', 'Offline bundles')}
   {@render item({ kind: 'desktop' }, 'monitor', 'Desktop')}
   {@render item({ kind: 'settings' }, 'gear', 'Settings')}
