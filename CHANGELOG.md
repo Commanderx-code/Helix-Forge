@@ -4,6 +4,21 @@ Each release is tagged `vMAJOR.MINOR.PATCH` on GitHub, with the program, its
 packages and their checksums. A release whose workflow only adopted updated
 dotfiles or Myfish sources raises the patch number and is not listed here.
 
+## v1.21.1
+
+- **Passwords off the command line and the screen.** The file encryption
+  tool hands its password to OpenSSL on a descriptor, not its command line
+  where other local users could read it, asks for it without showing it and
+  twice when encrypting, and derives the key with 600,000 PBKDF2 iterations;
+  files encrypted before still open. Add User and the encryption tool no
+  longer show passwords as they are typed, the WiFi Manager lets
+  NetworkManager ask for the passphrase instead of passing it on nmcli's
+  command line, and the Bluetooth Manager shows device names as plain text,
+  so a nearby device's name cannot send escape sequences to the terminal.
+  The virtual machine tests check Fedora's image against a digest pinned
+  from its signed checksum, and take the other checksums only from their
+  projects' own hosts.
+
 ## v1.21.0
 
 - **The terminal interface's running window shows each step.** Beside the
