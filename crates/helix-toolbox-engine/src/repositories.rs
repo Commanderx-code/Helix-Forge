@@ -183,18 +183,50 @@ pub trait Git: Sync {
     }
 }
 
-/// Ask git for a setting given only through the environment.
+/// Whether git says it is 2.31 or later, and gives back a value set only
+/// through the environment: a value of this run's own, asked outside any
+/// repository with no system or global settings read, so no settings file
+/// can answer for it.
 fn settings_from_environment(git: &(impl Git + ?Sized)) -> bool {
+    let recent = git
+        .run(&["--version".into()], &[])
+        .filter(|output| output.success)
+        .and_then(|output| version(&String::from_utf8_lossy(&output.stdout)))
+        .is_some_and(|found| found >= (2, 31));
+    if !recent {
+        return false;
+    }
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    let value = format!("{}-{nanos}", std::process::id());
     let key = "helix-toolbox.probe";
     git.run(
-        &["config".into(), "--get".into(), key.into()],
         &[
+            "-C".into(),
+            "/".into(),
+            "config".into(),
+            "--get".into(),
+            key.into(),
+        ],
+        &[
+            ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
+            ("GIT_CONFIG_SYSTEM".into(), "/dev/null".into()),
+            ("GIT_CONFIG_GLOBAL".into(), "/dev/null".into()),
             ("GIT_CONFIG_COUNT".into(), "1".into()),
             ("GIT_CONFIG_KEY_0".into(), key.into()),
-            ("GIT_CONFIG_VALUE_0".into(), "yes".into()),
+            ("GIT_CONFIG_VALUE_0".into(), value.clone()),
         ],
     )
-    .is_some_and(|output| output.success && output.stdout.trim_ascii() == b"yes")
+    .is_some_and(|output| output.success && output.stdout.trim_ascii() == value.as_bytes())
+}
+
+/// The major and minor version from `git --version`.
+fn version(text: &str) -> Option<(u32, u32)> {
+    let number = text.trim().strip_prefix("git version ")?;
+    let mut parts = number.split(|character: char| !character.is_ascii_digit());
+    Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1484,6 +1516,51 @@ mod tests {
         fn run(&self, args: &[String], _: &[(String, String)]) -> Option<Output> {
             Here.run(args, &[])
         }
+    }
+
+    /// Stands in for an old git that ignores GIT_CONFIG_COUNT and its other
+    /// settings variables, under a settings file that sets the key the check
+    /// asks for, and says it is the given version.
+    struct Spoofed {
+        settings: PathBuf,
+        version: &'static str,
+    }
+
+    impl Git for Spoofed {
+        fn run(&self, args: &[String], _: &[(String, String)]) -> Option<Output> {
+            if args == ["--version"] {
+                return Some(Output {
+                    success: true,
+                    stdout: self.version.as_bytes().to_vec(),
+                    truncated: false,
+                });
+            }
+            Here.run(
+                args,
+                &[(
+                    "GIT_CONFIG_GLOBAL".to_string(),
+                    self.settings.display().to_string(),
+                )],
+            )
+        }
+    }
+
+    #[test]
+    fn a_settings_file_or_a_version_cannot_answer_for_the_environment() {
+        let folder = tempfile::tempdir().unwrap();
+        let settings = folder.path().join("gitconfig");
+        std::fs::write(&settings, "[helix-toolbox]\n\tprobe = yes\n").unwrap();
+        for version in ["git version 2.55.0", "git version 2.30.2", "something else"] {
+            let spoofed = Spoofed {
+                settings: settings.clone(),
+                version,
+            };
+            assert!(!spoofed.takes_settings_from_environment(), "{version}");
+        }
+        assert_eq!(version("git version 2.31.0\n"), Some((2, 31)));
+        assert_eq!(version("git version 2.39.5 (Apple Git-154)"), Some((2, 39)));
+        assert_eq!(version("git version 3.0"), Some((3, 0)));
+        assert_eq!(version("hub version 2.14.2"), None);
     }
 
     #[test]
