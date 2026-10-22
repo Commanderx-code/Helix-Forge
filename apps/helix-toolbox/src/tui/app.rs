@@ -19,6 +19,7 @@ use helix_toolbox_catalog::Catalog;
 use helix_toolbox_core::{Action, Entry, Item};
 use helix_toolbox_engine::{
     EngineError, Machine, Plan, Probe, backups, bundle,
+    configs::{self, Checked},
     confirmation::{self, Prepared},
     doctor, drift, hardware_report, history,
     inventory::{Inventory, Status, which},
@@ -104,7 +105,7 @@ History, Backups, Doctor, Hardware, Desktop, Updates, Drift, Reliability, Settin
   Services: s start/stop  e enable/disable  R restart  i which  f filter   Storage: Enter cleans
   Performance: b an earlier boot  Enter acts on a hint   Recovery: c check snapshots  f set up
   Migration: e export  o open a file  a install    Restic: b back up  c check  s a file's history
-  Restic: Enter browse  R restore into a new folder  n record a baseline  v test it  w timer
+  Restic: Enter browse  R restore  n baseline  v test it  w timer   Configs: Enter change  E editor
   Repositories: Enter open/diff/run  Space stage  c commit  b branch  s stash  F p P sync
 
 Running window
@@ -149,6 +150,8 @@ enum Screen {
     Restic,
     /// The repositories under the project folders, and one of them.
     Repositories,
+    /// Ghostty's and Fastfetch's configuration, changed and saved as a plan.
+    Configs,
     Settings,
 }
 
@@ -223,6 +226,38 @@ enum MigrationRow {
     Text(String),
     /// A thing the opened migration names, by its place in the translation.
     Item(usize),
+}
+
+/// A line of the Configs screen.
+#[derive(Clone, Debug)]
+enum ConfigRow {
+    Heading(String),
+    Text(String),
+    /// A field of a configuration, by its place in the configuration's fields.
+    Field(configs::Kind, usize),
+    /// The whole file, in the user's editor.
+    Edit(configs::Kind),
+    /// A backup kept beside the file, by its place in its history.
+    Backup(configs::Kind, usize),
+}
+
+/// A configuration as read: the file to edit, its text, what its checks
+/// say and the backups kept beside it.
+struct ConfigPart {
+    kind: configs::Kind,
+    found: Result<configs::Located, String>,
+    loaded: Option<Result<configs::Loaded, String>>,
+    checked: Option<Checked>,
+    history: Vec<backups::Backup>,
+}
+
+/// A private copy of a configuration for the user's editor, which the
+/// event loop opens with the terminal handed back.
+pub struct EditRequest {
+    pub copy: PathBuf,
+    pub editor: String,
+    located: configs::Located,
+    loaded: configs::Loaded,
 }
 
 /// A migration file read here, or why it could not be.
@@ -346,6 +381,8 @@ enum Asked {
     StashMessage,
     /// A command of the user's to keep as a task of the open repository.
     AddTask,
+    /// A new value for this field of this configuration.
+    ConfigField(configs::Kind, &'static str),
 }
 
 /// A line of the Offline bundles screen.
@@ -763,6 +800,15 @@ pub struct App {
     repo_open: Option<(Details, Vec<Task>)>,
     opening_repo: Option<mpsc::Receiver<RepoOpened>>,
     repo_rows: Vec<RepoRow>,
+    config_parts: Vec<ConfigPart>,
+    config_rows: Vec<ConfigRow>,
+    /// The home and configuration folders configurations are found in, for
+    /// tests; this machine's otherwise.
+    config_places: Option<(PathBuf, PathBuf)>,
+    /// A configuration waiting to be opened in the user's editor.
+    edit_request: Option<EditRequest>,
+    /// The private folder for copies of configurations, for tests.
+    config_folder: Option<PathBuf>,
 }
 
 /// A plan of the queue as it was, from when it was made, with what the
@@ -892,6 +938,11 @@ impl App {
             repo_open: None,
             opening_repo: None,
             repo_rows: Vec::new(),
+            config_parts: Vec::new(),
+            config_rows: Vec::new(),
+            config_places: None,
+            edit_request: None,
+            config_folder: None,
         };
         app.update_rows();
         if !args.bypass_root && nix::unistd::Uid::effective().is_root() {
@@ -1146,6 +1197,7 @@ impl App {
             Screen::Migration => self.migration_rows.len(),
             Screen::Restic => self.restic_rows.len(),
             Screen::Repositories => self.repo_rows.len(),
+            Screen::Configs => self.config_rows.len(),
             Screen::Doctor => self.diagnoses.len() + self.doctor_entries().len(),
             Screen::Settings => self.settings().len(),
         }
@@ -1248,6 +1300,9 @@ impl App {
             } else {
                 self.build_restic_rows();
             }
+        }
+        if screen == Screen::Configs {
+            self.read_configs();
         }
         if screen == Screen::Repositories {
             if self.repos_found.is_none() {
@@ -1487,6 +1542,7 @@ impl App {
             Screen::Migration => Icon::Migration,
             Screen::Restic => Icon::Restic,
             Screen::Repositories => Icon::Repositories,
+            Screen::Configs => Icon::Configs,
             Screen::Favorites => Icon::Favorites,
             Screen::Doctor => Icon::Doctor,
             Screen::Settings => Icon::Settings,
@@ -1571,6 +1627,7 @@ impl App {
             Screen::Migration => self.draw_migration(frame, main),
             Screen::Restic => self.draw_restic(frame, main),
             Screen::Repositories => self.draw_repos(frame, main),
+            Screen::Configs => self.draw_configs(frame, main),
             Screen::Doctor => self.draw_doctor(frame, main),
             Screen::Settings => self.draw_settings(frame, main),
         }
@@ -3079,6 +3136,7 @@ impl App {
                     list.push(Hint::new(&["r"], "Read again"));
                 }
                 Screen::Repositories => self.repo_hints(&mut list),
+                Screen::Configs => self.config_hints(&mut list),
                 Screen::Settings => list.push(Hint::new(&["Enter"], "Change")),
             },
         }
@@ -3320,6 +3378,9 @@ impl App {
                     }
                     if self.screen == Screen::Restic {
                         self.read_restic();
+                    }
+                    if self.screen == Screen::Configs {
+                        self.read_configs();
                     }
                     if self.screen == Screen::Repositories {
                         self.reload_repos();
@@ -3959,6 +4020,7 @@ impl App {
                 _ => {}
             },
             Screen::Repositories => self.repo_key(key.code),
+            Screen::Configs => self.config_key(key.code),
             Screen::Bundles => match key.code {
                 KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Char('l') | KeyCode::Right => {
                     self.bundle_enter()
@@ -6304,6 +6366,10 @@ impl App {
             }
             Asked::CommitMessage => {
                 self.plan_repo_change(Change::Commit(text.to_string()));
+                return;
+            }
+            Asked::ConfigField(kind, key) => {
+                self.set_config(kind, key, text);
                 return;
             }
             Asked::NewBranch => {
@@ -9149,6 +9215,471 @@ impl App {
         frame.render_stateful_widget(list, inner, &mut self.main_state);
     }
 
+    // ----- Configs -----
+
+    /// Where a configuration is: in the tests' folders, else this machine's.
+    fn locate_config(&self, kind: configs::Kind) -> Result<configs::Located, String> {
+        match &self.config_places {
+            Some((home, config)) => configs::locate(
+                kind,
+                &configs::Facts {
+                    home,
+                    config_home: config,
+                    settings: None,
+                    command_center: None,
+                    store: Path::new("/nix/store"),
+                },
+            ),
+            None if self.examine_here => configs::here(kind),
+            None => Err("configurations are not read here".to_string()),
+        }
+    }
+
+    /// The private folder for copies: the tests' own, else beside the
+    /// history.
+    fn copies_folder(&self) -> PathBuf {
+        self.config_folder
+            .clone()
+            .or_else(configs::private_folder)
+            .unwrap_or_else(|| std::env::temp_dir().join("helix-toolbox-configs"))
+    }
+
+    /// Ghostty's own check on this machine; none in tests.
+    fn config_check(&self) -> fn(&Path) -> Option<(bool, String)> {
+        if self.examine_here {
+            configs::ghostty_here
+        } else {
+            |_| None
+        }
+    }
+
+    /// Read both configurations, their checks and their backups.
+    fn read_configs(&mut self) {
+        let check = self.config_check();
+        self.config_parts = configs::Kind::ALL
+            .into_iter()
+            .map(|kind| {
+                let found = self.locate_config(kind);
+                let (loaded, checked, history) = match &found {
+                    Ok(located) => {
+                        let loaded = configs::read(located);
+                        let checked = loaded.as_ref().ok().map(|loaded| {
+                            configs::validate(kind, &loaded.content, &check, &self.copies_folder())
+                        });
+                        (Some(loaded), checked, configs::history(located))
+                    }
+                    Err(_) => (None, None, Vec::new()),
+                };
+                ConfigPart {
+                    kind,
+                    found,
+                    loaded,
+                    checked,
+                    history,
+                }
+            })
+            .collect();
+        self.build_config_rows();
+    }
+
+    fn config_part(&self, kind: configs::Kind) -> Option<&ConfigPart> {
+        self.config_parts.iter().find(|part| part.kind == kind)
+    }
+
+    /// The configuration ready to change: where it is and its text.
+    fn config_ready(
+        &self,
+        kind: configs::Kind,
+    ) -> Result<(configs::Located, configs::Loaded), String> {
+        let part = self.config_part(kind).ok_or("it has not been read")?;
+        let located = part.found.clone()?;
+        let loaded = part.loaded.clone().ok_or("it has not been read")??;
+        Ok((located, loaded))
+    }
+
+    fn selected_config_row(&self) -> Option<ConfigRow> {
+        self.config_rows.get(self.main_state.selected()?).cloned()
+    }
+
+    /// The configuration the selected row belongs to.
+    fn selected_config_kind(&self) -> Option<configs::Kind> {
+        let at = self.main_state.selected()?;
+        self.config_rows[..=at.min(self.config_rows.len().saturating_sub(1))]
+            .iter()
+            .rev()
+            .find_map(|row| match row {
+                ConfigRow::Field(kind, _) | ConfigRow::Edit(kind) | ConfigRow::Backup(kind, _) => {
+                    Some(*kind)
+                }
+                ConfigRow::Heading(text) => configs::Kind::ALL
+                    .into_iter()
+                    .find(|kind| text.starts_with(kind.label())),
+                ConfigRow::Text(_) => None,
+            })
+    }
+
+    fn config_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => {
+                match self.selected_config_row() {
+                    Some(ConfigRow::Field(kind, index)) => self.ask_config_field(kind, index),
+                    Some(ConfigRow::Edit(kind)) => self.start_edit(kind),
+                    Some(ConfigRow::Backup(kind, index)) => self.restore_config(kind, index),
+                    _ => self.describe_config(),
+                }
+            }
+            KeyCode::Char('E') => {
+                if let Some(kind) = self.selected_config_kind() {
+                    self.start_edit(kind);
+                }
+            }
+            KeyCode::Char('d') => self.describe_config(),
+            KeyCode::Char('v') | KeyCode::Char('r') => self.read_configs(),
+            KeyCode::Char('h') | KeyCode::Left => self.focus = Focus::Sidebar,
+            _ => {}
+        }
+    }
+
+    fn config_hints(&self, list: &mut Vec<Hint>) {
+        list.push(Hint::new(&["↑↓"], "Navigate"));
+        match self.selected_config_row() {
+            Some(ConfigRow::Field(..)) => list.push(Hint::new(&["Enter"], "Change")),
+            Some(ConfigRow::Backup(..)) => list.push(Hint::new(&["Enter"], "Put back")),
+            _ => {}
+        }
+        if self.selected_config_kind().is_some() {
+            list.push(Hint::new(&["E"], "Edit in your editor"));
+        }
+        list.push(Hint::new(&["d"], "Details"));
+        list.push(Hint::new(&["r"], "Read again"));
+    }
+
+    fn cannot_config(&mut self, why: String) {
+        self.popup = Some(Popup::Text(TextPopup::new("Cannot change it", why, true)));
+    }
+
+    fn ask_config_field(&mut self, kind: configs::Kind, index: usize) {
+        let Some(field) = kind.fields().get(index) else {
+            return;
+        };
+        let (_, loaded) = match self.config_ready(kind) {
+            Ok(ready) => ready,
+            Err(why) => return self.cannot_config(why),
+        };
+        let now = configs::values(kind, &loaded.content)
+            .into_iter()
+            .find(|(key, _)| *key == field.key)
+            .and_then(|(_, value)| value)
+            .unwrap_or_default();
+        self.popup = Some(Popup::Ask(
+            InputPopup::new(
+                format!("{}: {}", kind.label(), field.label),
+                format!("{} ({}):", field.key, field.hint),
+            )
+            .with_value(now)
+            .answering("Review"),
+            Asked::ConfigField(kind, field.key),
+        ));
+    }
+
+    /// Change a field and review saving it.
+    fn set_config(&mut self, kind: configs::Kind, key: &str, value: &str) {
+        let (located, loaded) = match self.config_ready(kind) {
+            Ok(ready) => ready,
+            Err(why) => return self.cannot_config(why),
+        };
+        match configs::set(kind, &loaded.content, key, value) {
+            Ok(after) => self.save_config(&located, &loaded, &after),
+            Err(why) => self.cannot_config(why),
+        }
+    }
+
+    /// Check new text and review the plan that saves it.
+    fn save_config(&mut self, located: &configs::Located, loaded: &configs::Loaded, after: &str) {
+        let checked = configs::validate(
+            located.kind,
+            after,
+            &self.config_check(),
+            &self.copies_folder(),
+        );
+        if let Checked::Invalid(why) = &checked {
+            return self.cannot_config(format!("Not saved: {why}."));
+        }
+        if loaded.content == after {
+            self.popup = Some(Popup::Text(TextPopup::new(
+                "Nothing changed",
+                "The file is as it was; nothing is saved.",
+                true,
+            )));
+            return;
+        }
+        match configs::plan_save(
+            located,
+            &loaded.revision,
+            after,
+            &checked,
+            &self.copies_folder(),
+        ) {
+            Ok(planned) => self.confirm_plan(Ok(planned)),
+            Err(why) => self.cannot_config(why),
+        }
+    }
+
+    /// A private copy of the file for the user's editor, opened when the
+    /// key has been handled.
+    fn start_edit(&mut self, kind: configs::Kind) {
+        let (located, loaded) = match self.config_ready(kind) {
+            Ok(ready) => ready,
+            Err(why) => return self.cannot_config(why),
+        };
+        let copy = match configs::private_copy(kind, "edit", &loaded.content, &self.copies_folder())
+        {
+            Ok(copy) => copy,
+            Err(why) => return self.cannot_config(why),
+        };
+        let editor = std::env::var("VISUAL")
+            .ok()
+            .or_else(|| std::env::var("EDITOR").ok())
+            .filter(|editor| !editor.trim().is_empty())
+            .unwrap_or_else(|| "nano".to_string());
+        self.edit_request = Some(EditRequest {
+            copy,
+            editor,
+            located,
+            loaded,
+        });
+    }
+
+    /// The copy to open in the user's editor, once.
+    pub fn take_edit(&mut self) -> Option<EditRequest> {
+        self.edit_request.take()
+    }
+
+    /// The editor closed: check the copy, and review saving it.
+    pub fn edited(&mut self, request: EditRequest, closed: Result<(), String>) {
+        let after = std::fs::read_to_string(&request.copy);
+        let _ = std::fs::remove_file(&request.copy);
+        if let Err(why) = closed {
+            return self.cannot_config(format!("{why}; nothing is saved."));
+        }
+        match after {
+            Ok(after) => self.save_config(&request.located, &request.loaded, &after),
+            Err(error) => self.cannot_config(format!(
+                "The edited copy cannot be read: {error}; nothing is saved."
+            )),
+        }
+    }
+
+    /// Put a backup back, after review: the file there now is kept too.
+    fn restore_config(&mut self, kind: configs::Kind, index: usize) {
+        let Some(backup) = self
+            .config_part(kind)
+            .and_then(|part| part.history.get(index))
+            .cloned()
+        else {
+            return;
+        };
+        self.confirm_plan(Ok(backups::plan_restore(&backup)));
+    }
+
+    fn describe_config(&mut self) {
+        let Some(kind) = self.selected_config_kind() else {
+            return;
+        };
+        let Some(part) = self.config_part(kind) else {
+            return;
+        };
+        let text = match (&part.found, &part.loaded) {
+            (Err(why), _) => format!("{why}."),
+            (Ok(located), loaded) => {
+                let mut text = format!(
+                    "{}, named by {}.\n\n{} reads {}{}.",
+                    helix_toolbox_core::printable(&located.path.display().to_string()),
+                    located.origin.label(),
+                    kind.label(),
+                    helix_toolbox_core::printable(&located.live.display().to_string()),
+                    if located.managed {
+                        ", a Home Manager link into the Nix store"
+                    } else {
+                        ""
+                    }
+                );
+                if let Some(Ok(loaded)) = loaded {
+                    text.push_str(&format!(
+                        "\n\n{} bytes; SHA-256 {}.",
+                        loaded.content.len(),
+                        loaded.revision
+                    ));
+                }
+                if let Some(flake) = &located.flake {
+                    text.push_str(&format!(
+                        "\n\nIt is part of the Home Manager flake in {}: run Home Manager after a change to make it live.",
+                        helix_toolbox_core::printable(&flake.display().to_string())
+                    ));
+                }
+                text.push_str("\n\nA save keeps the file there now as a backup beside it, which Backups and helix-toolbox restore can put back.");
+                text
+            }
+        };
+        self.popup = Some(Popup::Text(TextPopup::new(
+            format!("{}'s configuration", kind.label()),
+            text,
+            true,
+        )));
+    }
+
+    fn build_config_rows(&mut self) {
+        let mut rows = Vec::new();
+        for part in &self.config_parts {
+            let kind = part.kind;
+            let located = match &part.found {
+                Ok(located) => located,
+                Err(why) => {
+                    rows.push(ConfigRow::Heading(kind.label().to_string()));
+                    rows.push(ConfigRow::Text(format!("{why}.")));
+                    continue;
+                }
+            };
+            rows.push(ConfigRow::Heading(format!(
+                "{}  {}",
+                kind.label(),
+                located.path.display()
+            )));
+            let mut about = format!("named by {}", located.origin.label());
+            if located.managed {
+                about.push_str("; the live file is a Home Manager link");
+            }
+            if located.flake.is_some() {
+                about.push_str("; run Home Manager after a change");
+            }
+            rows.push(ConfigRow::Text(about));
+            match &part.loaded {
+                Some(Err(why)) => {
+                    rows.push(ConfigRow::Text(format!("{why}.")));
+                    continue;
+                }
+                Some(Ok(loaded)) if !loaded.exists => {
+                    rows.push(ConfigRow::Text(
+                        "not there yet; a change makes it".to_string(),
+                    ));
+                }
+                _ => {}
+            }
+            if let Some(checked) = &part.checked {
+                rows.push(ConfigRow::Text(match checked {
+                    Checked::Valid => "Checks: valid".to_string(),
+                    Checked::Unchecked(why) | Checked::Invalid(why) => {
+                        format!("Checks: {}: {why}", checked.label())
+                    }
+                }));
+            }
+            rows.extend((0..kind.fields().len()).map(|index| ConfigRow::Field(kind, index)));
+            rows.push(ConfigRow::Edit(kind));
+            if !part.history.is_empty() {
+                rows.push(ConfigRow::Text(format!(
+                    "backups kept ({}), newest first:",
+                    part.history.len()
+                )));
+                rows.extend((0..part.history.len()).map(|index| ConfigRow::Backup(kind, index)));
+            }
+        }
+        self.config_rows = rows;
+        self.clamp_main();
+    }
+
+    fn draw_configs(&mut self, frame: &mut Frame, area: Rect) {
+        let inner = self.page(
+            frame,
+            area,
+            "Configs",
+            "Ghostty's and Fastfetch's configuration. Each change is checked and shown before it is saved, and the file there now is kept as a backup.",
+        );
+        self.fill(frame, inner);
+        let focused = self.focus == Focus::Main;
+        let muted = Style::default().fg(self.theme.muted());
+        let mut items: Vec<Line> = Vec::new();
+        for row in &self.config_rows {
+            items.push(match row {
+                ConfigRow::Heading(text) => Line::styled(
+                    helix_toolbox_core::printable(text),
+                    Style::default().fg(self.theme.group()).bold(),
+                ),
+                ConfigRow::Text(text) => {
+                    let color = if text.starts_with("Checks: Invalid") {
+                        self.theme.failure()
+                    } else {
+                        self.theme.muted()
+                    };
+                    Line::styled(
+                        format!("  {}", helix_toolbox_core::printable(text)),
+                        Style::default().fg(color),
+                    )
+                }
+                ConfigRow::Field(kind, index) => {
+                    let field = &kind.fields()[*index];
+                    let value = self
+                        .config_part(*kind)
+                        .and_then(|part| part.loaded.as_ref()?.as_ref().ok())
+                        .and_then(|loaded| {
+                            configs::values(*kind, &loaded.content)
+                                .into_iter()
+                                .find(|(key, _)| *key == field.key)?
+                                .1
+                        });
+                    Line::from(vec![
+                        Span::styled(
+                            format!("  {:<26}", field.label),
+                            Style::default().fg(self.theme.entry()),
+                        ),
+                        Span::styled(
+                            value
+                                .as_deref()
+                                .map(helix_toolbox_core::printable)
+                                .unwrap_or_else(|| "(not set)".to_string()),
+                            muted,
+                        ),
+                    ])
+                }
+                ConfigRow::Edit(_) => Line::styled(
+                    "  Edit the whole file in your editor…".to_string(),
+                    Style::default().fg(self.theme.entry()),
+                ),
+                ConfigRow::Backup(kind, index) => {
+                    let backup = self
+                        .config_part(*kind)
+                        .and_then(|part| part.history.get(*index));
+                    Line::from(vec![
+                        Span::styled(
+                            format!(
+                                "    {}  ",
+                                backup
+                                    .and_then(|backup| backup.taken.clone())
+                                    .unwrap_or_default()
+                            ),
+                            Style::default().fg(self.theme.entry()),
+                        ),
+                        Span::styled(
+                            backup
+                                .map(|backup| {
+                                    helix_toolbox_core::printable(
+                                        &backup.backup.display().to_string(),
+                                    )
+                                })
+                                .unwrap_or_default(),
+                            muted,
+                        ),
+                    ])
+                }
+            });
+        }
+        let list = List::new(items)
+            .block(self.card("Configs"))
+            .highlight_style(self.highlight(focused))
+            .highlight_symbol(self.marker(focused))
+            .scroll_padding(1);
+        frame.render_stateful_widget(list, inner, &mut self.main_state);
+    }
+
     // ----- Offline bundles -----
 
     fn selected_bundle_row(&self) -> Option<BundleRow> {
@@ -9956,6 +10487,11 @@ fn build_menu(catalog: &Catalog) -> Vec<MenuItem> {
     menu.push(MenuItem {
         label: "Repositories".into(),
         screen: Screen::Repositories,
+        section: "MORE TOOLS",
+    });
+    menu.push(MenuItem {
+        label: "Configs".into(),
+        screen: Screen::Configs,
         section: "MORE TOOLS",
     });
     menu.push(MenuItem {
@@ -11517,6 +12053,135 @@ mod tests {
         );
         press(&mut app, KeyCode::Char('n'));
         assert!(!matches!(app.popup, Some(Popup::Running(_))));
+    }
+
+    /// An app reading configurations in a home of its own: a Ghostty
+    /// configuration with a backup beside it, and a Fastfetch one that does
+    /// not check.
+    fn configs_app(home: &Path) -> App {
+        let config = home.join(".config");
+        std::fs::create_dir_all(config.join("ghostty")).unwrap();
+        std::fs::create_dir_all(config.join("fastfetch")).unwrap();
+        std::fs::write(config.join("ghostty/config"), "font-size = 11\n").unwrap();
+        std::fs::write(
+            config.join("ghostty/config.helix-toolbox-backup-20261001000000-1"),
+            "font-size = 10\n",
+        )
+        .unwrap();
+        std::fs::write(
+            config.join("fastfetch/config.jsonc"),
+            "{ \"modules\": \"os\" }\n",
+        )
+        .unwrap();
+        let mut app = app();
+        app.config_places = Some((home.to_path_buf(), config));
+        app.config_folder = Some(home.join("copies"));
+        app
+    }
+
+    #[test]
+    fn the_configs_screen_shows_both_files_their_checks_fields_and_backups() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().canonicalize().unwrap();
+        let mut app = configs_app(&home);
+        app.open_screen(Screen::Configs);
+        app.focus = Focus::Main;
+        let shown = screen(&mut app, 160, 50);
+        for text in [
+            "Ghostty",
+            "named by the live file",
+            "Checks: Not checked: Ghostty is not installed here",
+            "Font size",
+            "11",
+            "Edit the whole file in your editor",
+            "backups kept (1), newest first:",
+            "2026-10-01 00:00:00",
+            "Fastfetch",
+            "Checks: Invalid: \"modules\" must be a list",
+        ] {
+            assert!(shown.contains(text), "{text}: {shown}");
+        }
+        // d tells where it is and what a save keeps.
+        let field = app
+            .config_rows
+            .iter()
+            .position(|row| matches!(row, ConfigRow::Field(configs::Kind::Ghostty, 1)))
+            .unwrap();
+        app.main_state.select(Some(field));
+        press(&mut app, KeyCode::Char('d'));
+        let told = screen(&mut app, 160, 50);
+        assert!(told.contains("SHA-256"), "{told}");
+        assert!(told.contains("as a backup beside it"), "{told}");
+    }
+
+    #[test]
+    fn the_configs_screen_reviews_a_change_an_edit_and_a_backup_before_anything_is_saved() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().canonicalize().unwrap();
+        let file = home.join(".config/ghostty/config");
+        let mut app = configs_app(&home);
+        app.open_screen(Screen::Configs);
+        app.focus = Focus::Main;
+        // Enter on a field asks for its value, then reviews the save.
+        let field = app
+            .config_rows
+            .iter()
+            .position(|row| matches!(row, ConfigRow::Field(configs::Kind::Ghostty, 1)))
+            .unwrap();
+        app.main_state.select(Some(field));
+        press(&mut app, KeyCode::Enter);
+        assert!(matches!(
+            app.popup,
+            Some(Popup::Ask(
+                _,
+                Asked::ConfigField(configs::Kind::Ghostty, "font-size")
+            ))
+        ));
+        press(&mut app, KeyCode::Backspace);
+        press(&mut app, KeyCode::Backspace);
+        type_text(&mut app, "14");
+        press(&mut app, KeyCode::Enter);
+        assert!(matches!(app.popup, Some(Popup::Confirm(_))));
+        let shown = screen(&mut app, 160, 50);
+        assert!(shown.contains("Save Ghostty's configuration"), "{shown}");
+        press(&mut app, KeyCode::Char('n'));
+        assert!(!matches!(app.popup, Some(Popup::Running(_))));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "font-size = 11\n");
+        // E hands a private copy to the editor; what comes back is reviewed.
+        press(&mut app, KeyCode::Char('E'));
+        let request = app.take_edit().expect("a copy for the editor");
+        assert!(request.copy.starts_with(home.join("copies")));
+        std::fs::write(&request.copy, "font-size = 16\n").unwrap();
+        let copy = request.copy.clone();
+        app.edited(request, Ok(()));
+        assert!(!copy.exists(), "the copy is removed");
+        assert!(matches!(app.popup, Some(Popup::Confirm(_))));
+        press(&mut app, KeyCode::Char('n'));
+        // An edit of Fastfetch that does not check is refused.
+        let fastfetch = app
+            .config_rows
+            .iter()
+            .position(|row| matches!(row, ConfigRow::Edit(configs::Kind::Fastfetch)))
+            .unwrap();
+        app.main_state.select(Some(fastfetch));
+        press(&mut app, KeyCode::Enter);
+        let request = app.take_edit().unwrap();
+        std::fs::write(&request.copy, "{ \"modules\": [ { } ] }").unwrap();
+        app.edited(request, Ok(()));
+        let shown = screen(&mut app, 160, 50);
+        assert!(shown.contains("Not saved: module 1"), "{shown}");
+        press(&mut app, KeyCode::Esc);
+        // A backup is put back after review.
+        let backup = app
+            .config_rows
+            .iter()
+            .position(|row| matches!(row, ConfigRow::Backup(configs::Kind::Ghostty, 0)))
+            .unwrap();
+        app.main_state.select(Some(backup));
+        press(&mut app, KeyCode::Enter);
+        assert!(matches!(app.popup, Some(Popup::Confirm(_))));
+        press(&mut app, KeyCode::Char('n'));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "font-size = 11\n");
     }
 
     #[test]

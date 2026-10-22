@@ -27,6 +27,7 @@ pub enum Icon {
     Migration,
     Restic,
     Repositories,
+    Configs,
     Settings,
     Area,
     Group,
@@ -67,6 +68,7 @@ impl Icon {
                 Icon::Migration => "\u{f0ec}",      // exchange
                 Icon::Restic => "\u{f187}",         // archive
                 Icon::Repositories => "\u{f126}",   // code fork
+                Icon::Configs => "\u{f1de}",        // sliders
                 Icon::Settings => "\u{f013}",       // cog
                 Icon::Area => "\u{f07b}",           // folder
                 Icon::Group => "\u{f07b}",          // folder

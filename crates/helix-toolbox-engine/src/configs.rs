@@ -484,8 +484,9 @@ impl Checked {
 pub type Ghostty<'a> = &'a dyn Fn(&Path) -> Option<(bool, String)>;
 
 /// Check a file's text: its size and bytes, then Fastfetch's JSONC here or
-/// Ghostty's own check of a copy, in a private folder.
-pub fn validate(kind: Kind, text: &str, ghostty: Ghostty) -> Checked {
+/// Ghostty's own check of a copy in `folder`, a private folder
+/// (`private_folder`).
+pub fn validate(kind: Kind, text: &str, ghostty: Ghostty, folder: &Path) -> Checked {
     if text.len() > LIMIT {
         return Checked::Invalid(format!("it is larger than {} KB", LIMIT / 1000));
     }
@@ -498,9 +499,9 @@ pub fn validate(kind: Kind, text: &str, ghostty: Ghostty) -> Checked {
             None => Checked::Valid,
         },
         Kind::Ghostty => {
-            let Some(folder) = private_folder() else {
+            if prepare(folder).is_none() {
                 return Checked::Unchecked("there is no folder to check a copy in".to_string());
-            };
+            }
             let copy = folder.join(format!("ghostty-{}-{}.conf", std::process::id(), nanos()));
             if write_private(&copy, text.as_bytes()).is_err() {
                 return Checked::Unchecked(format!("{} cannot be written", copy.display()));
@@ -559,22 +560,22 @@ pub fn ghostty_here(file: &Path) -> Option<(bool, String)> {
     Some((status.success(), said))
 }
 
-/// Helix Toolbox's own folder for copies of configurations: closed to
-/// other users. Copies older than a day are removed.
-fn private_folder() -> Option<PathBuf> {
-    #[cfg(test)]
-    let folder = tests::FOLDER
-        .with(|folder| folder.borrow().clone())
-        .or_else(|| Some(crate::history::state_dir()?.join("configs")))?;
-    #[cfg(not(test))]
-    let folder = crate::history::state_dir()?.join("configs");
-    fs::create_dir_all(&folder).ok()?;
+/// Helix Toolbox's own folder for copies of configurations, beside the
+/// history.
+pub fn private_folder() -> Option<PathBuf> {
+    Some(crate::history::state_dir()?.join("configs"))
+}
+
+/// A folder for copies made ready: there, closed to other users, and with
+/// copies older than a day removed.
+fn prepare(folder: &Path) -> Option<()> {
+    fs::create_dir_all(folder).ok()?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&folder, fs::Permissions::from_mode(0o700)).ok()?;
+        fs::set_permissions(folder, fs::Permissions::from_mode(0o700)).ok()?;
     }
-    if let Ok(listing) = fs::read_dir(&folder) {
+    if let Ok(listing) = fs::read_dir(folder) {
         for item in listing.flatten() {
             let old = item
                 .metadata()
@@ -587,7 +588,7 @@ fn private_folder() -> Option<PathBuf> {
             }
         }
     }
-    Some(folder)
+    Some(())
 }
 
 /// Now, in nanoseconds, to keep copies' names apart.
@@ -610,9 +611,15 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     options.open(path)?.write_all(bytes)
 }
 
-/// A private copy of a file's text, for an editor or a plan to read.
-pub fn private_copy(kind: Kind, purpose: &str, text: &str) -> Result<PathBuf, String> {
-    let folder = private_folder().ok_or("there is no folder for a copy")?;
+/// A private copy of a file's text in `folder`, for an editor or a plan to
+/// read.
+pub fn private_copy(
+    kind: Kind,
+    purpose: &str,
+    text: &str,
+    folder: &Path,
+) -> Result<PathBuf, String> {
+    prepare(folder).ok_or("there is no folder for a copy")?;
     let extension = match kind {
         Kind::Ghostty => "conf",
         Kind::Fastfetch => "jsonc",
@@ -1175,13 +1182,15 @@ pub fn history(located: &Located) -> Vec<backups::Backup> {
 
 /// The plan that saves new text over the file: run, it checks the file is
 /// still as it was read (`revision`), keeps it as a configuration backup
-/// beside it, and writes the new text from a private copy, keeping the
-/// file's permissions. `checked` is what the checks said of the new text.
+/// beside it, and writes the new text from a private copy in `folder`,
+/// keeping the file's permissions. `checked` is what the checks said of the
+/// new text.
 pub fn plan_save(
     located: &Located,
     revision: &str,
     text: &str,
     checked: &Checked,
+    folder: &Path,
 ) -> Result<Plan, String> {
     if let Checked::Invalid(why) = checked {
         return Err(format!("not saved: {why}"));
@@ -1196,7 +1205,7 @@ pub fn plan_save(
     if now.content == text {
         return Err("nothing changed".to_string());
     }
-    let staged = private_copy(located.kind, "staged", text)?;
+    let staged = private_copy(located.kind, "staged", text, folder)?;
     let file = quote(&located.path.to_string_lossy());
     let copy = quote(&staged.to_string_lossy());
     let expected = quote(revision);
@@ -1275,16 +1284,6 @@ pub fn diff(path: &Path, before: &str, after: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
-
-    thread_local! {
-        /// The private folder, for a test.
-        pub(super) static FOLDER: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
-    }
-
-    fn private_here(folder: &Path) {
-        FOLDER.with(|set| *set.borrow_mut() = Some(folder.join("configs")));
-    }
 
     fn none(_: &Path) -> Option<(bool, String)> {
         None
@@ -1406,7 +1405,10 @@ mod tests {
     #[test]
     fn fastfetch_jsonc_is_read_with_comments_and_trailing_commas() {
         let text = "// mine\n{\n    \"$schema\": \"x\", /* a note */\n    \"logo\": { \"source\": \"arch\" },\n    \"modules\": [\n        \"title\",\n        { \"type\": \"os\", \"format\": \"{1}\" }, // the system\n        \"memory\",\n    ],\n}\n";
-        assert_eq!(validate(Kind::Fastfetch, text, &none), Checked::Valid);
+        assert_eq!(
+            validate(Kind::Fastfetch, text, &none, Path::new("/nonexistent")),
+            Checked::Valid
+        );
         assert_eq!(
             fastfetch_value(text, "modules").as_deref(),
             Some("title, os, memory")
@@ -1423,7 +1425,7 @@ mod tests {
             ("{ a: 1 }", "double quotes"),
             ("{ \"a\": \"x\n\" }", "not closed"),
         ] {
-            match validate(Kind::Fastfetch, bad, &none) {
+            match validate(Kind::Fastfetch, bad, &none, Path::new("/nonexistent")) {
                 Checked::Invalid(said) => assert!(said.contains(why), "{bad}: {said}"),
                 other => panic!("{bad}: {other:?}"),
             }
@@ -1446,7 +1448,10 @@ mod tests {
         );
         let changed = set(Kind::Fastfetch, &changed, "modules", "os, kernel, title").unwrap();
         assert!(changed.contains("[\n        { \"type\": \"os\", \"format\": \"{1}\" },\n        \"kernel\",\n        \"title\"\n    ]"), "{changed}");
-        assert_eq!(validate(Kind::Fastfetch, &changed, &none), Checked::Valid);
+        assert_eq!(
+            validate(Kind::Fastfetch, &changed, &none, Path::new("/nonexistent")),
+            Checked::Valid
+        );
         // An empty file, and a logo given as a name.
         let made = set(Kind::Fastfetch, "", "modules", "os").unwrap();
         assert_eq!(fastfetch_value(&made, "modules").as_deref(), Some("os"));
@@ -1472,7 +1477,7 @@ mod tests {
     #[test]
     fn ghostty_checks_a_copy_and_says_when_it_cannot() {
         let state = tempfile::tempdir().unwrap();
-        private_here(state.path());
+        let folder = state.path().join("configs");
         let rejects = |file: &Path| {
             let text = fs::read_to_string(file).unwrap();
             Some(if text.contains("bogus") {
@@ -1482,21 +1487,21 @@ mod tests {
             })
         };
         assert_eq!(
-            validate(Kind::Ghostty, "theme = x\n", &rejects),
+            validate(Kind::Ghostty, "theme = x\n", &rejects, &folder),
             Checked::Valid
         );
-        match validate(Kind::Ghostty, "bogus = 1\n", &rejects) {
+        match validate(Kind::Ghostty, "bogus = 1\n", &rejects, &folder) {
             Checked::Invalid(why) => {
                 assert_eq!(why, "Ghostty rejected it: the file: unknown field: bogus")
             }
             other => panic!("{other:?}"),
         }
         assert!(matches!(
-            validate(Kind::Ghostty, "x = 1", &none),
+            validate(Kind::Ghostty, "x = 1", &none, &folder),
             Checked::Unchecked(_)
         ));
         // No copy is left behind.
-        let left = fs::read_dir(state.path().join("configs")).unwrap().count();
+        let left = fs::read_dir(&folder).unwrap().count();
         assert_eq!(left, 0);
     }
 
@@ -1504,7 +1509,7 @@ mod tests {
     fn saving_is_a_plan_that_checks_the_file_and_keeps_a_backup() {
         let place = place();
         let state = tempfile::tempdir().unwrap();
-        private_here(state.path());
+        let folder = state.path().join("configs");
         let file = place.config.join("ghostty/config");
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(&file, "font-size = 11\n").unwrap();
@@ -1516,12 +1521,13 @@ mod tests {
                 &located,
                 &loaded.revision,
                 &text,
-                &Checked::Invalid("no".into())
+                &Checked::Invalid("no".into()),
+                &folder
             )
             .is_err()
         );
         assert!(
-            plan_save(&located, "0000", &text, &Checked::Valid)
+            plan_save(&located, "0000", &text, &Checked::Valid, &folder)
                 .unwrap_err()
                 .contains("changed since")
         );
@@ -1530,6 +1536,7 @@ mod tests {
             &loaded.revision,
             &text,
             &Checked::Unchecked("not checked".into()),
+            &folder,
         )
         .unwrap();
         assert_eq!(planned.warnings, ["not checked."]);
