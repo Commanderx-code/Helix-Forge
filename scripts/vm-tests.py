@@ -1082,25 +1082,32 @@ def recovery_and_restores(machine, shots):
     snapshot taken and the snapshot check run as root, which only reads."""
     restored_and_undone(machine, '$HOME/.config/hf-restore/config', '')
     restored_and_undone(machine, '/etc/hf-restore/hf.conf', 'sudo ')
-    read = lambda: json.loads(machine.ssh('./helix-toolbox --json recovery').stdout)['data']
-    ready = read()
+    ready = json.loads(machine.ssh('./helix-toolbox --json recovery').stdout)['data']
     ids = [check['id'] for check in ready['checks']]
     if ids[0] != 'snapshots' or 'configuration-backups' not in ids:
         raise RuntimeError(f'the recovery checks are {ids}')
+    log('  recovery: two restores put back and undone; the readiness checks read')
+
+
+def snapshot_check(machine, shots):
+    """Snapper set up on the Btrfs root as an installation would, a snapshot
+    taken, and helix-toolbox recovery --check-snapshots run as root, which
+    finds a system in it and changes nothing."""
     root = machine.ssh('findmnt -no FSTYPE /').stdout.strip()
-    if ready['snapshots'] != 'Snapper' and root == 'btrfs':
-        # The cloud image has Btrfs but no Snapper: set it up as an
-        # installation would, so the check has snapshots to look at.
-        machine.ssh('sudo zypper -n -q in snapper >/dev/null && sudo snapper -c root create-config /', check=False)
-        ready = read()
+    if root != 'btrfs':
+        raise RuntimeError(f'the root file system is {root}, not Btrfs, so Snapper cannot be set up')
+    machine.ssh('sudo dnf -y -q install snapper >/dev/null && sudo snapper -c root create-config /')
+    ready = json.loads(machine.ssh('./helix-toolbox --json recovery').stdout)['data']
     if ready['snapshots'] != 'Snapper':
-        log(f'  recovery: two restores put back and undone; no Snapper on {root}, so no snapshot check')
-        return
+        raise RuntimeError(f'recovery does not see Snapper set up: {ready}')
     machine.ssh("sudo snapper -c root create --description 'Helix Toolbox test'")
+    before = machine.ssh('sudo snapper --csvout -c root list --columns number').stdout
     checked = machine.ssh('./helix-toolbox recovery --check-snapshots --yes').stdout
     if 'holds a system to roll back to' not in checked:
         raise RuntimeError(f'the snapshot check did not find a system in the newest snapshot:\n{checked[-1500:]}')
-    log('  recovery: two restores put back and undone; the newest Snapper snapshot holds a system')
+    if machine.ssh('sudo snapper --csvout -c root list --columns number').stdout != before:
+        raise RuntimeError('the snapshot check changed the snapshots')
+    log('  snapshot check: the newest Snapper snapshot holds a system, and the snapshots are as they were')
 
 
 def zypper_bundle(machine, shots):
@@ -1200,7 +1207,8 @@ CASES = {
     'debian': [('grub-dracula', grub_theme), ('grub-default', grub_default), ('plymouth-on', plymouth_on),
                ('plymouth-off', plymouth_off), ('apparmor', apparmor), ('sddm', sddm), ('enable-ssd-trim', ssd_trim)],
     'fedora': [('grub-dracula', grub_theme), ('grub-default', grub_default), ('plymouth-on', plymouth_on),
-               ('plymouth-off', plymouth_off), ('selinux', selinux), ('sddm', sddm), ('enable-ssd-trim', ssd_trim)],
+               ('plymouth-off', plymouth_off), ('selinux', selinux), ('sddm', sddm), ('enable-ssd-trim', ssd_trim),
+               ('snapshot-check', snapshot_check)],
     'arch-uefi': [('grub-dracula', grub_theme), ('grub-default', grub_default), ('limine-cachyos', limine_cachyos),
                   ('limine-garuda', limine_garuda)],
     'opensuse': [('bundle-zypper', zypper_bundle), ('update-notifications', update_notifications),
@@ -1220,7 +1228,7 @@ CASES = {
 # Cases with nothing for verify to check afterward: not catalog entries,
 # or an installation whose live system is gone once it finishes.
 NOT_ENTRIES = {'bundle-flatpak', 'bundle-zypper', 'update-notifications', 'arch-server-setup',
-               'services-and-storage', 'recovery-and-restores'}
+               'services-and-storage', 'recovery-and-restores', 'snapshot-check'}
 
 
 def verify(machine, entry):

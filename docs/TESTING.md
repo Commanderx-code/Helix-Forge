@@ -139,8 +139,8 @@ its published checksum:
 
 | Machine | What it is |
 |---|---|
-| `arch`, `debian`, `fedora` | the distribution's cloud image on BIOS firmware, with a USB stick plugged into the Arch one |
-| `opensuse` | the openSUSE Tumbleweed cloud image on BIOS firmware, for offline bundles and the notifications' timer under the user's own systemd: updates, then health problems and a package removed since a Drift baseline, told once; and `fstrim.timer` enabled, started, disabled, stopped and enabled again through `helix-toolbox services`, each checked with `systemctl`, with old journal entries cleaned through `helix-toolbox storage`; and a file of the user's and a system file put back through `helix-toolbox restore` and the restores undone, each checked by its contents, then the recovery checks and, with Snapper set up, a snapshot taken and the snapshot check run as root |
+| `arch`, `debian`, `fedora` | the distribution's cloud image on BIOS firmware, with a USB stick plugged into the Arch one; on Fedora's Btrfs root, Snapper set up, a snapshot taken and `helix-toolbox recovery --check-snapshots` run as root, which finds a system in it and leaves the snapshots as they were |
+| `opensuse` | the openSUSE Tumbleweed cloud image on BIOS firmware, for offline bundles and the notifications' timer under the user's own systemd: updates, then health problems and a package removed since a Drift baseline, told once; and `fstrim.timer` enabled, started, disabled, stopped and enabled again through `helix-toolbox services`, each checked with `systemctl`, with old journal entries cleaned through `helix-toolbox storage`; and a file of the user's and a system file put back through `helix-toolbox restore` and the restores undone, each checked by its contents, then the recovery checks |
 | `arch-bundle` | the Arch cloud image on BIOS firmware, for the Flatpak offline bundle, whose runtimes take a long time to download |
 | `arch-themes`, `arch-ctt-themes` | the Arch cloud image on BIOS firmware, for the GRUB themes, split in two so they run at once, with Garuda's repository added for its theme |
 | `arch-uefi` | the Arch cloud image on UEFI firmware (OVMF) |
