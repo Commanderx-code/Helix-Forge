@@ -530,3 +530,32 @@ export type RepoChange =
   | { kind: 'pull' }
   | { kind: 'push' }
   | { kind: 'publish'; remote: string };
+
+/** Ghostty's and Fastfetch's configuration, as `helix-toolbox config` reads them. */
+export type ConfigKind = 'ghostty' | 'fastfetch';
+
+/** What the checks say of a configuration's text. */
+export type ConfigChecked = { state: 'valid' } | { state: 'unchecked' | 'invalid'; message: string };
+
+export type ConfigField = { key: string; label: string; hint: string; value: string | null };
+
+export type ConfigView = {
+  kind: ConfigKind;
+  label: string;
+  /** Why it cannot be edited, when it cannot. */
+  problem: string | null;
+  path: string | null;
+  live: string | null;
+  origin: string | null;
+  managed: boolean;
+  flake: string | null;
+  exists: boolean;
+  revision: string | null;
+  content: string;
+  checked: ConfigChecked | null;
+  fields: ConfigField[];
+  backups: { backup: string; taken: string | null }[];
+};
+
+/** A field changed in a draft, not saved yet. */
+export type ConfigDraft = { content: string; fields: ConfigField[] };

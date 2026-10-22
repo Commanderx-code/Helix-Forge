@@ -68,6 +68,11 @@ The items:
 - [x] Project workspaces: tasks found in `package.json`, Cargo, Makefiles
       and justfiles without running them, your own kept with favorites in
       `workspaces.toml`, each run in its folder after review
+- [x] Ghostty and Fastfetch configuration editors: the file to edit, its
+      Home Manager source found, checks, common fields and the whole file,
+      saved as a reviewed plan that keeps a backup and refuses a file
+      changed since it was read; changed, refused and put back for real in
+      the distribution containers
 
 ## v1.19.0: moving machines
 

@@ -106,6 +106,20 @@ printf 'hello\n' > "$work/home/notes.txt"
 unset RESTIC_PASSWORD RESTIC_PASSWORD_FILE RESTIC_PASSWORD_COMMAND
 export RESTIC_REPOSITORY="$work/repository" RESTIC_WALLET=smoke \
     RESTIC_WALLET_ENTRY=restic RESTIC_WALLET_FOLDER=Passwords
+# Configurations for the Configs screen, and a stand-in ghostty that checks
+# Ghostty's, rejecting a "bogus" field.
+mkdir -p "$work/config/ghostty" "$work/config/fastfetch"
+printf 'font-size = 12\n' > "$work/config/ghostty/config"
+printf '{\n    "modules": ["title", "os"]\n}\n' > "$work/config/fastfetch/config.jsonc"
+cat > "$work/bin/ghostty" <<'EOF'
+#!/bin/sh
+[ "$1" = +validate-config ] || exit 2
+if grep -q bogus "${2#--config-file=}"; then
+    echo "unknown field: bogus"
+    exit 1
+fi
+EOF
+chmod +x "$work/bin/ghostty"
 # The marker fixture writes here, which shows the run really ran.
 export HELIX_TOOLBOX_TEST_OUT="$work/marker.txt"
 # WebKitGTK on a virtual display: no GPU, no compositor.
@@ -186,6 +200,16 @@ if ! grep -qx -- '--user restart helix-toolbox-restic.timer' "$work/systemctl.lo
 fi
 if grep -E ' (backup|restore [0-9a-f]|dump|check)( |$)' "$work/restic.log"; then
     echo "restic was asked to change something" >&2
+    exit 1
+fi
+# Ghostty's configuration was saved, and the one before kept beside it.
+if ! grep -qx 'font-size = 14' "$work/config/ghostty/config"; then
+    echo "the Ghostty configuration was not saved" >&2
+    exit 1
+fi
+set -- "$work/config/ghostty/config.helix-toolbox-backup-"*
+if ! grep -qx 'font-size = 12' "$1" 2>/dev/null; then
+    echo "the Ghostty configuration before the save was not kept" >&2
     exit 1
 fi
 # The hardware report's issue went to the browser, filled in.

@@ -3,6 +3,7 @@
 
 mod analyze;
 mod bundle;
+mod configs;
 mod docgen;
 mod drift;
 mod inspect;
@@ -294,6 +295,15 @@ enum Command {
     Repos {
         #[command(subcommand)]
         action: Option<repos::ReposCommand>,
+    },
+    /// Ghostty's and Fastfetch's configuration: which file is edited, its
+    /// checks, a few common fields, your editor on a copy and the backups
+    /// kept. Saving is a plan, confirmed first, that keeps the current file
+    /// as a backup.
+    Config {
+        program: configs::Program,
+        #[command(subcommand)]
+        action: Option<configs::ConfigCommand>,
     },
     /// The hardware and firmware: fwupd's devices and the firmware updates it
     /// knows of, disks, temperatures, batteries, PCI and USB devices. It only
@@ -1001,6 +1011,9 @@ fn main() -> Result<()> {
         Command::Migrate { action } => migrate::migrate(action, &load(false)?, &platform, as_json),
         Command::Restic { action } => restic::restic(action, &load(false)?, &platform, as_json),
         Command::Repos { action } => repos::repos(action, &load(false)?, &platform, as_json),
+        Command::Config { program, action } => {
+            configs::config(program, action, &load(false)?, &platform, as_json)
+        }
         Command::Hardware {
             smart,
             firmware,

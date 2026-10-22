@@ -195,7 +195,7 @@
     await until('the focus back on Marker', () => document.activeElement === marker);
   });
 
-  const screens = ['Updates','Backups', 'Drift', 'Reliability', 'Hardware', 'Services', 'Storage', 'Performance', 'Recovery', 'Migration', 'Restic', 'Repositories', 'Desktop', 'History', 'Favorites', 'Dashboard'];
+  const screens = ['Updates','Backups', 'Drift', 'Reliability', 'Hardware', 'Services', 'Storage', 'Performance', 'Recovery', 'Migration', 'Restic', 'Repositories', 'Configs', 'Desktop', 'History', 'Favorites', 'Dashboard'];
   for (const name of screens) {
     await step(`the ${name} screen opens`, async () => {
       await click(name, document.querySelector('nav'));
@@ -481,6 +481,55 @@
     await until('the review to close', () => !document.querySelector('#confirm-title'));
     await click('All repositories');
     return 'diff shown; a stage and a task reviewed; nothing ran';
+  });
+
+  await step('a configuration field is changed, checked and saved, and its backup reviewed', async () => {
+    await click('Configs', document.querySelector('nav'));
+    await until('Configs', () => screenTitle().startsWith('Configs'));
+    const card = await until('the Ghostty card', () => document.querySelector('[aria-label="Ghostty\'s configuration"]'), 30000);
+    // The stand-in ghostty of scripts/gui-smoke.sh checks it.
+    await until('its check', () => [...card.querySelectorAll('.pill')].some((pill) => pill.textContent.includes('Valid')));
+    const size = await until('the font size', () => card.querySelector('#ghostty-font-size'));
+    await type(size, '14');
+    size.parentElement.querySelector('button').click();
+    const text = card.querySelector('#ghostty-text');
+    await until('the draft', () => text.value.includes('font-size = 14'));
+    await click('Check', card);
+    await until('the draft checked', () => [...card.querySelectorAll('.pill')].some((pill) => pill.textContent.includes('Valid')));
+    await accessible('a configuration with a draft');
+    await click('Save', card);
+    const title = await until('the confirmation', () => document.querySelector('#confirm-title'), 30000);
+    const dialog = title.closest('[role="dialog"]');
+    if (!dialog.textContent.includes("Save Ghostty's configuration")) throw new Error(dialog.textContent.trim());
+    // The file now and after, side by side.
+    await click('What it changes', dialog);
+    await until('the side by side', () => document.querySelector('[role="dialog"] .change'), 30000);
+    await click('Side by side', document.querySelector('[role="dialog"]'));
+    await until('the rows', () => document.querySelector('[role="dialog"]').textContent.includes('font-size = 14'));
+    const preview = document.querySelector('[role="dialog"]').textContent;
+    if (!preview.includes('font-size = 14')) throw new Error(`the change preview does not show the new size: ${preview.slice(0, 600)}`);
+    await click('Back to the confirmation', dialog);
+    const primary = await until('the confirm button', () => dialog.querySelector('.button.primary'));
+    primary.click();
+    const result = await until('the result', () => withText('.good, .bad', 'Result:'), 60000);
+    if (!result.classList.contains('good')) throw new Error(result.textContent.trim());
+    await click('Close');
+    await until('the run panel to close', () => !document.querySelector('#run-title'));
+    // Read again after the run: the one before is kept, and putting it back is reviewed.
+    const again = await until('the backup', () => document.querySelector('[aria-label="Backups of Ghostty\'s configuration"]'), 30000);
+    await click('Put back', again);
+    const review = await until('the review', () => document.querySelector('#confirm-title')?.closest('[role="dialog"]'), 30000);
+    if (!review.textContent.includes('Restore')) throw new Error(review.textContent.trim());
+    await click('Cancel', review);
+    await until('the review to close', () => !document.querySelector('#confirm-title'));
+    // A draft Ghostty rejects is not offered to save.
+    const fresh = document.querySelector('[aria-label="Ghostty\'s configuration"]');
+    await type(fresh.querySelector('#ghostty-text'), 'bogus = 1\n');
+    await click('Check', fresh);
+    await until('the refusal', () => fresh.textContent.includes('Ghostty rejected it'));
+    if (!button('Save', fresh)?.disabled) throw new Error('a rejected draft can be saved');
+    await click('Discard changes', fresh);
+    return 'a field saved for real with a backup kept; a put-back reviewed; a rejected draft refused';
   });
 
   await step('an entry is checked now, without changing anything', async () => {
