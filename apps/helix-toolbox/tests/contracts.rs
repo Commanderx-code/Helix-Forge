@@ -100,7 +100,16 @@ fn json_shapes_only_gain_fields() {
     let directory = root().join("tests/contracts/json");
     let migration = root().join("tests/contracts/files/migration-1.19.toml");
     let migration = migration.to_str().unwrap();
-    let commands: [(&str, &[&str]); 20] = [
+    // A Ghostty configuration with a backup kept beside it.
+    let ghostty = home.path().join("config/ghostty");
+    fs::create_dir_all(&ghostty).unwrap();
+    fs::write(ghostty.join("config"), "font-size = 12\n").unwrap();
+    fs::write(
+        ghostty.join("config.helix-toolbox-backup-20261001000000-1"),
+        "font-size = 11\n",
+    )
+    .unwrap();
+    let commands: [(&str, &[&str]); 22] = [
         ("system", &["system"]),
         ("list", &["list"]),
         ("search", &["search", "marker"]),
@@ -121,6 +130,8 @@ fn json_shapes_only_gain_fields() {
         ("migration", &["migrate", "show", migration]),
         ("restic", &["restic"]),
         ("restic-baselines", &["restic", "baseline"]),
+        ("config", &["config", "ghostty"]),
+        ("config-history", &["config", "ghostty", "history"]),
     ];
     let mut problems = Vec::new();
     for (name, args) in commands {
