@@ -2304,7 +2304,10 @@ mod tests {
             plan_install(&bundle, &read, &[], &suse, &Fake::default(), false).unwrap_err();
         assert!(refused.to_string().contains("--trust-bundle"), "{refused}");
         let mut signed = Fake::default();
-        for name in ["htop-3.5.3-1.1.x86_64.rpm", "libhwloc15-2.13.0-1.3.x86_64.rpm"] {
+        for name in [
+            "htop-3.5.3-1.1.x86_64.rpm",
+            "libhwloc15-2.13.0-1.3.x86_64.rpm",
+        ] {
             let file = std::fs::canonicalize(bundle.join("packages").join(name)).unwrap();
             signed.commands.insert(
                 format!(
@@ -2322,8 +2325,14 @@ mod tests {
             panic!("a shell step");
         };
         // Each staged copy's signature is checked again before it installs.
-        assert!(program.contains(&format!("{RPM_SIGNATURE} -- \"$hf_package\"")), "{program}");
-        assert!(program.contains(RPM_SIGNED) && program.contains(RPM_FAILED), "{program}");
+        assert!(
+            program.contains(&format!("{RPM_SIGNATURE} -- \"$hf_package\"")),
+            "{program}"
+        );
+        assert!(
+            program.contains(RPM_SIGNED) && program.contains(RPM_FAILED),
+            "{program}"
+        );
         assert!(planned.steps[0].display().contains("rpm keyring"));
         assert!(
             program.contains("sudo zypper $hf_answer --no-refresh --no-remote install"),
@@ -2394,7 +2403,9 @@ mod tests {
         bundle_of(directory.path(), "debian", "htop_3.3_amd64.ddeb", b"deb");
         let refused = verify(directory.path(), &debian).unwrap_err();
         assert!(
-            refused.to_string().contains("htop_3.3_amd64.ddeb is not a debian package"),
+            refused
+                .to_string()
+                .contains("htop_3.3_amd64.ddeb is not a debian package"),
             "{refused}"
         );
         // Named as a Debian package, it must still be known to the signed
@@ -2404,7 +2415,10 @@ mod tests {
         verify(&named, &debian).unwrap();
         let refused =
             plan_install(&named, &manifest, &[], &debian, &Fake::default(), false).unwrap_err();
-        assert!(refused.to_string().contains("htop_3.3_amd64.deb"), "{refused}");
+        assert!(
+            refused.to_string().contains("htop_3.3_amd64.deb"),
+            "{refused}"
+        );
         assert!(plan_install(&named, &manifest, &[], &debian, &Fake::default(), true).is_ok());
     }
 
@@ -2439,25 +2453,44 @@ mod tests {
         let read = verify(directory.path(), &fedora).unwrap();
         assert_eq!(read, manifest);
         // Unsigned: refused, unless the bundle is trusted.
-        let refused =
-            plan_install(directory.path(), &read, &[], &fedora, &Fake::default(), false)
-                .unwrap_err();
+        let refused = plan_install(
+            directory.path(),
+            &read,
+            &[],
+            &fedora,
+            &Fake::default(),
+            false,
+        )
+        .unwrap_err();
         assert!(
-            refused.to_string().contains("foo-1.0-1.x86_64.rpm carry no signature"),
+            refused
+                .to_string()
+                .contains("foo-1.0-1.x86_64.rpm carry no signature"),
             "{refused}"
         );
-        let trusted =
-            plan_install(directory.path(), &read, &[], &fedora, &Fake::default(), true).unwrap();
+        let trusted = plan_install(
+            directory.path(),
+            &read,
+            &[],
+            &fedora,
+            &Fake::default(),
+            true,
+        )
+        .unwrap();
         let Step::Shell { program, .. } = &trusted.steps[0] else {
             panic!("a shell step");
         };
         assert!(program.contains("rpm -K \"$hf_staging\"/'foo-1.0-1.x86_64.rpm' || exit 1"));
         assert!(!program.contains("localpkg_gpgcheck"), "{program}");
-        assert!(trusted.steps[0].display().contains("their digests (rpm -K)"));
+        assert!(
+            trusted.steps[0]
+                .display()
+                .contains("their digests (rpm -K)")
+        );
         // Signed by a key in the keyring: dnf checks it again, and so does
         // the step, on the copy it installs.
-        let file = std::fs::canonicalize(directory.path().join("packages/foo-1.0-1.x86_64.rpm"))
-            .unwrap();
+        let file =
+            std::fs::canonicalize(directory.path().join("packages/foo-1.0-1.x86_64.rpm")).unwrap();
         let mut signed = Fake::default();
         signed.commands.insert(
             format!(
