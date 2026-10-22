@@ -59,7 +59,7 @@ The items:
       installed through its packages, Flatpaks from Flathub, a family's
       packages by name within it, and the rest listed for the user;
       applied for real in the distribution containers, and a Flatpak
-      brought back from Flathub on an Arch machine
+      exported and planned from Flathub on an Arch machine
 
 ## v1.18.0: performance and recovery
 
