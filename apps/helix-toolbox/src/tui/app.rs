@@ -6,6 +6,7 @@ use super::{
     effects::{EffectsPopup, Outcome as EffectsOutcome},
     hints::Hint,
     icons::Icon,
+    mouse::{self, Hits, Target},
     palette::{Choice, Outcome, Palette},
     popup::{Answer, ConfirmPopup, Decision, InputPopup, TextPopup, centered},
     running::RunningView,
@@ -14,7 +15,7 @@ use super::{
     wizard::{Outcome as WizardOutcome, Pick, Wizard},
 };
 use crate::TuiArgs;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use helix_toolbox_catalog::Catalog;
 use helix_toolbox_core::{Action, Entry, Item};
 use helix_toolbox_engine::{
@@ -41,10 +42,11 @@ use ratatui::{
     style::{Color, Style},
     symbols::border,
     text::{Line, Span, Text},
-    widgets::{Block, List, ListState, Padding, Paragraph, Wrap},
+    widgets::{Block, List, ListItem, ListState, Padding, Paragraph, Wrap},
 };
 use ratatui_image::{Image, protocol::Protocol};
 use std::{
+    cell::RefCell,
     collections::HashMap,
     path::{Path, PathBuf},
     sync::mpsc,
@@ -84,6 +86,7 @@ const HELP: &str = "Everywhere
   /                 search every area            ?   this help
   Ctrl-K            commands, by name            q / Ctrl-C  quit
   j / k             move in the sidebar          Enter / l   open the screen or quick action
+  Mouse             click to open or select, again for Enter; wheel scrolls; Shift-drag selects text
 
 Areas (Applications and the other catalog screens)
   Enter / l         open a group or run an entry o / x / Del  Profiles: import, export, delete
@@ -107,10 +110,7 @@ History, Backups, Doctor, Hardware, Desktop, Updates, Drift, Reliability, Settin
   Restic: Enter browse  R restore  b back up  c check  s history  n baseline  v test it  w timer
   Configs: Enter change a field or put a backup back   E your editor on the whole file
   Repositories: Enter open/diff/run  Space stage  c commit  b branch  s stash  F p P sync
-
-Running window
-  Ctrl-C            stop; again, kill what is left  Enter / q   close when finished
-  l                 save the log                 Page up / down   scroll;  a report: c copies it
+Running window   Ctrl-C stop, again kill   Enter / q close   l save the log   Page up / down scroll
 ";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -491,6 +491,7 @@ enum Act {
     UpdateEntries,
     Theme,
     Icons,
+    Mouse,
     Help,
     Quit,
 }
@@ -659,6 +660,10 @@ pub struct App {
     show_hidden: bool,
     /// Nerd Font icons, or plain text.
     icons: bool,
+    /// Clicks and the wheel, through the terminal's mouse reporting.
+    mouse: bool,
+    /// What the last frame drew where, for the mouse.
+    hits: RefCell<Hits>,
     /// After a failed step, continue with the steps that do not need it.
     keep_going: bool,
     /// Take a snapshot before system changes, where the machine can.
@@ -871,6 +876,8 @@ impl App {
             skip_confirmation: args.skip_confirmation,
             show_hidden: args.override_validation,
             icons: !args.plain,
+            mouse: true,
+            hits: RefCell::new(Hits::default()),
             keep_going: false,
             snapshots: true,
             snapshot_tool: None,
@@ -994,6 +1001,7 @@ impl App {
             look.theme
         });
         self.icons = look.icons && !args.plain;
+        self.mouse = look.mouse;
         self.keep_going = look.keep_going;
         if let Some(path) = &path {
             let favorites = settings::favorites_path(path);
@@ -1077,6 +1085,7 @@ impl App {
             keep_going: self.keep_going,
             snapshots: self.snapshots,
             set_up: self.set_up,
+            mouse: self.mouse,
         };
         if let Err(error) = settings::save(path, &look) {
             tracing::warn!(%error, "the settings were not saved");
@@ -1614,6 +1623,7 @@ impl App {
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
+        self.hits.get_mut().clear();
         let area = frame.area();
         frame.render_widget(Block::default().style(self.theme.base()), area);
         let too_small = (area.width < MIN_WIDTH || area.height < MIN_HEIGHT)
@@ -1652,6 +1662,7 @@ impl App {
             .split(rows[1]);
         self.draw_sidebar(frame, columns[0]);
         let main = columns[1];
+        self.hits.get_mut().main(main);
         match self.screen {
             Screen::Dashboard => self.draw_dashboard(frame, main),
             Screen::Area(_) => self.draw_area(frame, main),
@@ -1862,7 +1873,9 @@ impl App {
             } else {
                 self.theme.card()
             };
-            let inside = self.framed(frame, Rect::new(inner.x, y, inner.width, 3), border, fill);
+            let card = Rect::new(inner.x, y, inner.width, 3);
+            self.hits.get_mut().menu(card.intersection(inner), index);
+            let inside = self.framed(frame, card, border, fill);
             frame.render_widget(
                 Paragraph::new(label).block(Block::default().padding(Padding::horizontal(1))),
                 inside,
@@ -1982,6 +1995,7 @@ impl App {
                     area,
                 ),
                 Row::Item(index) => {
+                    self.hits.borrow_mut().menu(area, *index);
                     let item = &self.menu[*index];
                     let current = item.screen == self.screen;
                     self.menu_row(
@@ -2023,6 +2037,18 @@ impl App {
             inner.width,
             inner.height.saturating_sub(3),
         )
+    }
+
+    /// A list's items, their heights noted for the mouse.
+    fn measure<'a, T: Into<ListItem<'a>>>(
+        &self,
+        items: impl IntoIterator<Item = T>,
+    ) -> Vec<ListItem<'a>> {
+        let items: Vec<ListItem> = items.into_iter().map(Into::into).collect();
+        self.hits
+            .borrow_mut()
+            .measured(items.iter().map(|item| item.height() as u16).collect());
+        items
     }
 
     fn card(&self, title: &str) -> Block<'static> {
@@ -2121,10 +2147,10 @@ impl App {
                     ])
                 })
                 .collect();
-            let widget = List::new(items)
+            let widget = List::new(self.measure(items))
                 .highlight_style(self.highlight(focused))
                 .highlight_symbol(self.marker(focused));
-            frame.render_stateful_widget(widget, list, &mut self.main_state);
+            main_list(frame, widget, list, &mut self.main_state, &self.hits);
             return;
         }
         let selected = self.main_state.selected().unwrap_or(0);
@@ -2133,6 +2159,7 @@ impl App {
             if rect.bottom() > list.bottom() {
                 break;
             }
+            self.hits.get_mut().row(rect, index);
             self.action_card(
                 frame,
                 rect,
@@ -2393,12 +2420,12 @@ impl App {
             })
             .collect();
         self.fill(frame, area);
-        let list = List::new(lines)
+        let list = List::new(self.measure(lines))
             .block(block)
             .highlight_style(self.highlight(focused))
             .highlight_symbol(marker)
             .scroll_padding(1);
-        frame.render_stateful_widget(list, area, &mut self.main_state);
+        bordered_list(frame, list, area, &mut self.main_state, &self.hits);
     }
 
     fn draw_plan(&mut self, frame: &mut Frame, area: Rect) {
@@ -2521,11 +2548,11 @@ impl App {
             })
             .collect();
         self.fill(frame, parts[2]);
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card("Queued entries"))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused));
-        frame.render_stateful_widget(list, parts[2], &mut self.main_state);
+        bordered_list(frame, list, parts[2], &mut self.main_state, &self.hits);
     }
 
     fn draw_backups(&mut self, frame: &mut Frame, area: Rect) {
@@ -2630,11 +2657,11 @@ impl App {
                 ])
             })
             .collect();
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card("Backups"))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused));
-        frame.render_stateful_widget(list, parts[2], &mut self.main_state);
+        bordered_list(frame, list, parts[2], &mut self.main_state, &self.hits);
     }
 
     fn draw_history(&mut self, frame: &mut Frame, area: Rect) {
@@ -2680,11 +2707,11 @@ impl App {
             })
             .collect();
         self.fill(frame, inner);
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card("Runs"))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused));
-        frame.render_stateful_widget(list, inner, &mut self.main_state);
+        bordered_list(frame, list, inner, &mut self.main_state, &self.hits);
     }
 
     fn settings(&self) -> Vec<(String, String)> {
@@ -2772,6 +2799,14 @@ impl App {
                 "Log level (HELIX_TOOLBOX_LOG)".to_string(),
                 crate::logging::requested().unwrap_or_else(|| "info".to_string()),
             ),
+            (
+                "Mouse".to_string(),
+                if self.mouse {
+                    "on (Shift+drag selects text)".to_string()
+                } else {
+                    "off".to_string()
+                },
+            ),
         ]
     }
 
@@ -2797,11 +2832,11 @@ impl App {
             })
             .collect();
         self.fill(frame, inner);
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card("Settings"))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused));
-        frame.render_stateful_widget(list, inner, &mut self.main_state);
+        bordered_list(frame, list, inner, &mut self.main_state, &self.hits);
     }
 
     fn draw_footer(&self, frame: &mut Frame, area: Rect) {
@@ -2842,11 +2877,42 @@ impl App {
         };
         let row =
             Rect::new(area.x + 1, area.y + 1, area.width.saturating_sub(2), 1).intersection(area);
+        let right_line = Line::from(spans(&right));
+        let right_x = row.right().saturating_sub(right_line.width() as u16);
+        self.hint_hits(&left, row.x, row);
+        self.hint_hits(&right, right_x, row);
         frame.render_widget(Paragraph::new(Line::from(spans(&left))), row);
-        frame.render_widget(
-            Paragraph::new(Line::from(spans(&right))).alignment(Alignment::Right),
-            row,
-        );
+        frame.render_widget(Paragraph::new(right_line).alignment(Alignment::Right), row);
+    }
+
+    /// Where each of the hints drawn from `x` on is, for a click: each key
+    /// of a hint where its name is, its description sending the first.
+    fn hint_hits(&self, hints: &[&Hint], mut x: u16, row: Rect) {
+        let mut hits = self.hits.borrow_mut();
+        let width = |text: &str| Span::raw(text).width() as u16;
+        for (index, hint) in hints.iter().enumerate() {
+            if index > 0 {
+                x += width(" · ");
+            }
+            let start = x;
+            for (number, name) in hint.keys().iter().enumerate() {
+                if number > 0 {
+                    x += width("/");
+                }
+                if let Some(key) = mouse::key_named(name) {
+                    hits.key(Rect::new(x, row.y, width(name), 1).intersection(row), key);
+                }
+                x += width(name);
+            }
+            let text = width(&format!(" {}", hint.text()));
+            if let Some(key) = hint.keys().first().and_then(|name| mouse::key_named(name)) {
+                hits.key(
+                    Rect::new(start, row.y, x - start + text, 1).intersection(row),
+                    key,
+                );
+            }
+            x += text;
+        }
     }
 
     fn hints(&self) -> (&'static str, Vec<Hint>) {
@@ -3201,6 +3267,118 @@ impl App {
     // ----- keys -----
 
     /// Returns false when Helix Toolbox should exit.
+    /// Whether the terminal should report the mouse.
+    pub fn mouse(&self) -> bool {
+        self.mouse
+    }
+
+    /// A click or the wheel, done as the keys that do the same, so nothing
+    /// a click starts skips its review. Returns false to quit, as a click
+    /// on the q hint asks.
+    pub fn handle_mouse(&mut self, event: &MouseEvent) -> bool {
+        if !self.mouse {
+            return true;
+        }
+        let target = self.hits.borrow().at(event.column, event.row);
+        match event.kind {
+            MouseEventKind::ScrollDown => self.wheel(true, event),
+            MouseEventKind::ScrollUp => self.wheel(false, event),
+            MouseEventKind::Down(MouseButton::Left) => match target {
+                Some(Target::Key(key)) => self.handle_key(&key),
+                // Behind a popup only its hints answer.
+                _ if self.popup.is_some() => true,
+                Some(Target::Menu(index)) => {
+                    let screen = self.menu[index].screen;
+                    if screen == self.screen && self.focus == Focus::Sidebar {
+                        self.press(KeyCode::Enter)
+                    } else {
+                        if screen != self.screen {
+                            self.open_screen(screen);
+                        }
+                        self.focus = Focus::Sidebar;
+                        true
+                    }
+                }
+                Some(Target::Row(index)) => self.click_row(index),
+                None => true,
+            },
+            _ => true,
+        }
+    }
+
+    fn press(&mut self, code: KeyCode) -> bool {
+        self.handle_key(&KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    /// Give the main list the focus, as the keys would: Enter from the
+    /// sidebar or the search line.
+    fn focus_main(&mut self) -> bool {
+        match self.focus {
+            Focus::Main => true,
+            Focus::Sidebar | Focus::Search => self.press(KeyCode::Enter),
+        }
+    }
+
+    /// A click on a row selects it, by the arrow keys; a click on the row
+    /// already selected in the focused list is Enter.
+    fn click_row(&mut self, index: usize) -> bool {
+        if self.focus != Focus::Main {
+            return self.focus_main() && self.select_by_keys(index);
+        }
+        let selected = self.main_state.selected().unwrap_or(0);
+        if index == selected {
+            return self.press(KeyCode::Enter);
+        }
+        self.select_by_keys(index)
+    }
+
+    fn select_by_keys(&mut self, index: usize) -> bool {
+        for _ in 0..self.main_len() {
+            let before = self.main_state.selected().unwrap_or(0);
+            if before == index {
+                break;
+            }
+            let code = if index > before {
+                KeyCode::Down
+            } else {
+                KeyCode::Up
+            };
+            if !self.press(code) {
+                return false;
+            }
+            if self.main_state.selected().unwrap_or(0) == before {
+                break;
+            }
+        }
+        true
+    }
+
+    /// The wheel scrolls what is under it: a popup's text or list, the
+    /// output of a run, or the main list's selection.
+    fn wheel(&mut self, down: bool, event: &MouseEvent) -> bool {
+        let code = if down { KeyCode::Down } else { KeyCode::Up };
+        match &mut self.popup {
+            // Keys go to the command running, so the wheel scrolls its output instead.
+            Some(Popup::Running(running)) => {
+                running.scroll(if down { -3 } else { 3 });
+                true
+            }
+            // A typed answer has nothing to scroll.
+            Some(
+                Popup::ProfileName(_)
+                | Popup::BaselineName(_)
+                | Popup::FirmwareWord(_)
+                | Popup::LookName(_)
+                | Popup::Ask(..),
+            ) => true,
+            Some(_) => self.press(code),
+            None if self.hits.borrow().in_main(event.column, event.row) => {
+                self.focus_main() && self.press(code)
+            }
+            None => true,
+        }
+    }
+
     pub fn handle_key(&mut self, key: &KeyEvent) -> bool {
         let control_c =
             key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c');
@@ -4554,7 +4732,7 @@ impl App {
             ]));
         }
         self.fill(frame, inner);
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(
                 self.card(if self.examining.is_some() && !self.diagnoses.is_empty() {
                     "Checks (checking again…)"
@@ -4564,7 +4742,7 @@ impl App {
             )
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused));
-        frame.render_stateful_widget(list, inner, &mut self.main_state);
+        bordered_list(frame, list, inner, &mut self.main_state, &self.hits);
     }
 
     /// Look at the update channels in the background; `online` also asks the
@@ -4700,11 +4878,11 @@ impl App {
             _ => "Channels",
         };
         self.fill(frame, inner);
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card(title))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused));
-        frame.render_stateful_widget(list, inner, &mut self.main_state);
+        bordered_list(frame, list, inner, &mut self.main_state, &self.hits);
     }
 
     // ----- the command palette -----
@@ -4731,7 +4909,7 @@ impl App {
                 Act::Open(item.screen),
             );
         }
-        let actions: [(&str, &str, Act); 16] = [
+        let actions: [(&str, &str, Act); 17] = [
             (
                 "Check updates online",
                 "updates refresh",
@@ -4795,6 +4973,15 @@ impl App {
                 },
                 "nerd font plain",
                 Act::Icons,
+            ),
+            (
+                if self.mouse {
+                    "Turn the mouse off"
+                } else {
+                    "Turn the mouse on"
+                },
+                "mouse click wheel scroll select text",
+                Act::Mouse,
             ),
         ];
         for (label, keywords, act) in actions {
@@ -4948,6 +5135,10 @@ impl App {
             }
             Act::Icons => {
                 self.icons = !self.icons;
+                self.save_look();
+            }
+            Act::Mouse => {
+                self.mouse = !self.mouse;
                 self.save_look();
             }
             Act::Help => {
@@ -5404,11 +5595,11 @@ impl App {
                 ])
             })
             .collect();
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card("Differences"))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused));
-        frame.render_stateful_widget(list, parts[2], &mut self.main_state);
+        bordered_list(frame, list, parts[2], &mut self.main_state, &self.hits);
     }
 
     /// The change preview of a plan.
@@ -5845,12 +6036,12 @@ impl App {
                 ]),
             })
             .collect();
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card("This machine"))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused))
             .scroll_padding(1);
-        frame.render_stateful_widget(list, inner, &mut self.main_state);
+        bordered_list(frame, list, inner, &mut self.main_state, &self.hits);
     }
 
     // ----- Hardware -----
@@ -5928,12 +6119,12 @@ impl App {
         } else {
             "This machine"
         };
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card(title))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused))
             .scroll_padding(1);
-        frame.render_stateful_widget(list, inner, &mut self.main_state);
+        bordered_list(frame, list, inner, &mut self.main_state, &self.hits);
     }
 
     // ----- Reliability and trust -----
@@ -6125,7 +6316,7 @@ impl App {
             coverage => format!("Entries · {}", coverage.label()),
         };
         self.fill(frame, parts[2]);
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(
                 self.card(&title).title(
                     Line::styled(
@@ -6138,7 +6329,7 @@ impl App {
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused))
             .scroll_padding(1);
-        frame.render_stateful_widget(list, parts[2], &mut self.main_state);
+        bordered_list(frame, list, parts[2], &mut self.main_state, &self.hits);
     }
 
     fn reload_backups(&mut self) {
@@ -6267,6 +6458,10 @@ impl App {
             }
             10 => self.open_wizard(false),
             11 => self.make_report(),
+            13 => {
+                self.mouse = !self.mouse;
+                self.save_look();
+            }
             _ => {}
         }
     }
@@ -6946,12 +7141,12 @@ impl App {
                 }
             }
         }
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card(&title))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused))
             .scroll_padding(1);
-        frame.render_stateful_widget(list, inner, &mut self.main_state);
+        bordered_list(frame, list, inner, &mut self.main_state, &self.hits);
     }
 
     // ----- Storage -----
@@ -7125,12 +7320,12 @@ impl App {
                 });
             }
         }
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card("Storage"))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused))
             .scroll_padding(1);
-        frame.render_stateful_widget(list, inner, &mut self.main_state);
+        bordered_list(frame, list, inner, &mut self.main_state, &self.hits);
     }
 
     // ----- Performance -----
@@ -7544,12 +7739,12 @@ impl App {
         } else {
             "Boot and machine"
         };
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card(title))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused))
             .scroll_padding(1);
-        frame.render_stateful_widget(list, inner, &mut self.main_state);
+        bordered_list(frame, list, inner, &mut self.main_state, &self.hits);
     }
 
     // ----- Recovery -----
@@ -7660,11 +7855,11 @@ impl App {
             ]));
         }
         self.fill(frame, inner);
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card("Readiness"))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused));
-        frame.render_stateful_widget(list, inner, &mut self.main_state);
+        bordered_list(frame, list, inner, &mut self.main_state, &self.hits);
     }
 
     // ----- Migration -----
@@ -7958,12 +8153,12 @@ impl App {
                 }
             });
         }
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card("Migration"))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused))
             .scroll_padding(1);
-        frame.render_stateful_widget(list, inner, &mut self.main_state);
+        bordered_list(frame, list, inner, &mut self.main_state, &self.hits);
     }
 
     // ----- Home Manager -----
@@ -8275,12 +8470,12 @@ impl App {
                 }
             });
         }
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card("Home Manager"))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused))
             .scroll_padding(1);
-        frame.render_stateful_widget(list, inner, &mut self.main_state);
+        bordered_list(frame, list, inner, &mut self.main_state, &self.hits);
     }
 
     // ----- Restic -----
@@ -8923,12 +9118,12 @@ impl App {
                 }
             });
         }
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card("Restic"))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused))
             .scroll_padding(1);
-        frame.render_stateful_widget(list, inner, &mut self.main_state);
+        bordered_list(frame, list, inner, &mut self.main_state, &self.hits);
     }
 
     // ----- Repositories -----
@@ -9645,12 +9840,12 @@ impl App {
                 }
             });
         }
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card("Repositories"))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused))
             .scroll_padding(1);
-        frame.render_stateful_widget(list, inner, &mut self.main_state);
+        bordered_list(frame, list, inner, &mut self.main_state, &self.hits);
     }
 
     // ----- Configs -----
@@ -10112,12 +10307,12 @@ impl App {
                 }
             });
         }
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card("Configs"))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused))
             .scroll_padding(1);
-        frame.render_stateful_widget(list, inner, &mut self.main_state);
+        bordered_list(frame, list, inner, &mut self.main_state, &self.hits);
     }
 
     // ----- Offline bundles -----
@@ -10406,12 +10601,12 @@ impl App {
             })
             .collect();
         self.fill(frame, parts[0]);
-        let list = List::new(items)
+        let list = List::new(self.measure(items))
             .block(self.card("Offline bundles"))
             .highlight_style(self.highlight(focused))
             .highlight_symbol(self.marker(focused))
             .scroll_padding(1);
-        frame.render_stateful_widget(list, parts[0], &mut self.main_state);
+        bordered_list(frame, list, parts[0], &mut self.main_state, &self.hits);
         self.fill(frame, parts[2]);
         frame.render_widget(
             Paragraph::new(help)
@@ -11000,6 +11195,32 @@ fn strip_escapes(text: &str) -> String {
     result
 }
 
+/// Draw a list with the main selection, and note where its items are for
+/// the mouse.
+fn main_list(
+    frame: &mut Frame,
+    list: List,
+    area: Rect,
+    state: &mut ListState,
+    hits: &RefCell<Hits>,
+) {
+    frame.render_stateful_widget(list, area, state);
+    hits.borrow_mut().list(area, state.offset());
+}
+
+/// `main_list` for a list in a card, its items inside the border.
+fn bordered_list(
+    frame: &mut Frame,
+    list: List,
+    area: Rect,
+    state: &mut ListState,
+    hits: &RefCell<Hits>,
+) {
+    frame.render_stateful_widget(list, area, state);
+    hits.borrow_mut()
+        .list(Block::bordered().inner(area), state.offset());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -11131,6 +11352,136 @@ mod tests {
         assert_eq!(app.main_state.selected(), Some(1));
         press(&mut app, KeyCode::Char('h'));
         assert_eq!(app.focus, Focus::Sidebar);
+    }
+
+    /// Where `text` is drawn, as the column and row of its first cell.
+    fn find(app: &mut App, text: &str) -> (u16, u16) {
+        let drawn = screen(app, 120, 40);
+        for (row, line) in drawn.lines().enumerate() {
+            if let Some(at) = line.find(text) {
+                return (line[..at].chars().count() as u16, row as u16);
+            }
+        }
+        panic!("{text:?} is not on the screen:\n{drawn}");
+    }
+
+    fn mouse_at(app: &mut App, kind: MouseEventKind, (column, row): (u16, u16)) -> bool {
+        app.handle_mouse(&MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    }
+
+    fn click(app: &mut App, text: &str) -> bool {
+        let at = find(app, text);
+        mouse_at(app, MouseEventKind::Down(MouseButton::Left), at)
+    }
+
+    /// A click on the lowest place `text` is drawn, such as a result below
+    /// the search that found it.
+    fn click_last(app: &mut App, text: &str) -> bool {
+        let drawn = screen(app, 120, 40);
+        let (column, row) = drawn
+            .lines()
+            .enumerate()
+            .filter_map(|(row, line)| {
+                line.find(text)
+                    .map(|at| (line[..at].chars().count() as u16, row as u16))
+            })
+            .last()
+            .unwrap_or_else(|| panic!("{text:?} is not on the screen:\n{drawn}"));
+        mouse_at(app, MouseEventKind::Down(MouseButton::Left), (column, row))
+    }
+
+    #[test]
+    fn clicks_open_screens_and_select_rows_and_a_second_click_is_enter() {
+        let mut app = app();
+        let area = app.menu[1].label.clone();
+        click(&mut app, &area);
+        assert_eq!(app.screen, Screen::Area(0));
+        assert_eq!(app.focus, Focus::Sidebar);
+        // A row of the list: selected, by the keys, and the list focused.
+        click(&mut app, "Developer Tools");
+        assert_eq!(app.focus, Focus::Main);
+        let row = app.main_state.selected().unwrap();
+        assert!(
+            matches!(app.selected_row(), Some(Row::Group { .. })),
+            "row {row}"
+        );
+        assert!(app.at_root());
+        click(&mut app, "Developer Tools");
+        assert_eq!(
+            app.areas[0].path.len(),
+            1,
+            "the second click opens the group"
+        );
+        // On an entry, the second click asks first, as Enter does; a click
+        // beside the confirmation answers nothing.
+        press(&mut app, KeyCode::Char('/'));
+        type_text(&mut app, "System Report (script)");
+        let name = "System Report (script)";
+        click_last(&mut app, name);
+        assert_eq!(app.focus, Focus::Main);
+        assert!(app.popup.is_none());
+        click_last(&mut app, name);
+        assert!(matches!(app.popup, Some(Popup::Confirm(_))));
+        click(&mut app, &area);
+        mouse_at(&mut app, MouseEventKind::Down(MouseButton::Left), (60, 20));
+        assert!(matches!(app.popup, Some(Popup::Confirm(_))));
+        assert_eq!(app.screen, Screen::Area(0));
+        // Its hints are its keys: n cancels.
+        click(&mut app, "n/q/Esc");
+        assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_list_and_popups_and_hints_are_keys() {
+        let mut app = app();
+        press(&mut app, KeyCode::Char('j'));
+        let list = find(&mut app, "Developer Tools");
+        mouse_at(&mut app, MouseEventKind::ScrollDown, list);
+        assert_eq!(app.focus, Focus::Main);
+        let before = app.main_state.selected().unwrap();
+        mouse_at(&mut app, MouseEventKind::ScrollDown, list);
+        assert_eq!(app.main_state.selected(), Some(before + 1));
+        mouse_at(&mut app, MouseEventKind::ScrollUp, list);
+        assert_eq!(app.main_state.selected(), Some(before));
+        // The wheel over the sidebar changes no screen.
+        let sidebar = find(&mut app, "MAIN MENU");
+        mouse_at(&mut app, MouseEventKind::ScrollDown, sidebar);
+        assert_eq!(app.screen, Screen::Area(0));
+        // The ? hint is the ? key; the wheel scrolls the help it opens.
+        click(&mut app, "? Help");
+        let Some(Popup::Text(_)) = &app.popup else {
+            panic!("the help did not open")
+        };
+        mouse_at(&mut app, MouseEventKind::ScrollDown, (60, 20));
+        let Some(Popup::Text(help)) = &app.popup else {
+            panic!("the wheel closed the help")
+        };
+        assert_eq!(help.scroll(), 1);
+        click(&mut app, "Enter/q/Esc");
+        assert!(app.popup.is_none());
+        // And q quits.
+        assert!(!click(&mut app, "q Quit"));
+    }
+
+    #[test]
+    fn the_mouse_can_be_turned_off_in_settings() {
+        let mut app = app();
+        assert!(app.mouse());
+        app.open_screen(Screen::Settings);
+        press(&mut app, KeyCode::Enter);
+        click(&mut app, "Mouse");
+        click(&mut app, "Mouse");
+        assert!(!app.mouse(), "{}", screen(&mut app, 120, 40));
+        assert!(screen(&mut app, 120, 40).contains("off"));
+        // Off, clicks do nothing at all.
+        let area = app.menu[1].label.clone();
+        click(&mut app, &area);
+        assert_eq!(app.screen, Screen::Settings);
     }
 
     #[test]

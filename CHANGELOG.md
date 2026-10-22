@@ -13,6 +13,12 @@ dotfiles or Myfish sources raises the patch number and is not listed here.
   end the result and every check, failures first and those done after the
   reboot or not checked here marked so, as in the window. `c` copies the bug
   report and the hardware report.
+- **The mouse in the terminal interface.** A click opens a screen from the
+  sidebar, selects a row, and on the row already selected does what `Enter`
+  does, which still asks first. A click on a key hint presses that key, and
+  the wheel scrolls lists, popups and a run's output. Settings, or the
+  command palette, turns it off to leave the mouse to the terminal; most
+  terminals select text with `Shift` held meanwhile.
 
 ## v1.20.1
 

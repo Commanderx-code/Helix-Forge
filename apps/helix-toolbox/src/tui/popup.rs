@@ -97,6 +97,12 @@ impl TextPopup {
         frame.render_widget(paragraph, area);
     }
 
+    /// How far down the text is scrolled.
+    #[cfg(test)]
+    pub fn scroll(&self) -> u16 {
+        self.scroll.0
+    }
+
     /// Returns true when the window should close.
     pub fn handle_key(&mut self, key: &KeyEvent) -> bool {
         let max_scroll = self.line_count.saturating_sub(self.visible_lines.max(1));

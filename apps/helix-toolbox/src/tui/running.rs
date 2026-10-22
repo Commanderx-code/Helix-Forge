@@ -497,6 +497,12 @@ impl RunningView {
         frame.render_widget(PseudoTerminal::new(parser.screen()), terminal);
     }
 
+    /// Scroll the output: back by a positive number of lines, forward by a
+    /// negative one.
+    pub fn scroll(&mut self, lines: isize) {
+        self.scrollback = self.scrollback.saturating_add_signed(lines);
+    }
+
     /// Returns true when the window should close.
     pub fn handle_key(&mut self, key: &KeyEvent) -> bool {
         match key.code {
