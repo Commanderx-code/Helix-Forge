@@ -9439,10 +9439,10 @@ impl App {
             Ok(copy) => copy,
             Err(why) => return self.cannot_config(why),
         };
-        let editor = std::env::var("VISUAL")
-            .ok()
-            .or_else(|| std::env::var("EDITOR").ok())
-            .filter(|editor| !editor.trim().is_empty())
+        let editor = ["VISUAL", "EDITOR"]
+            .iter()
+            .filter_map(|name| std::env::var(name).ok())
+            .find(|editor| !editor.trim().is_empty())
             .unwrap_or_else(|| "nano".to_string());
         self.edit_request = Some(EditRequest {
             copy,

@@ -280,10 +280,10 @@ pub fn config(
             let loaded = configs::read(&located).map_err(anyhow::Error::msg)?;
             let copy = configs::private_copy(kind, "edit", &loaded.content, &folder()?)
                 .map_err(anyhow::Error::msg)?;
-            let editor = std::env::var("VISUAL")
-                .ok()
-                .or_else(|| std::env::var("EDITOR").ok())
-                .filter(|editor| !editor.trim().is_empty())
+            let editor = ["VISUAL", "EDITOR"]
+                .iter()
+                .filter_map(|name| std::env::var(name).ok())
+                .find(|editor| !editor.trim().is_empty())
                 .unwrap_or_else(|| "nano".to_string());
             // The editor is the user's own; it may carry arguments.
             let status = std::process::Command::new("sh")
